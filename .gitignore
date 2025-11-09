@@ -205,3 +205,20 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+####### Latex file extensions
+**/*.aux*
+**/*.fls*
+**/*.fdb*
+**/*.out
+**/*.toc
+**/*.lot
+**/*.lof
+**/*.sty
+
+# PDFs
+**/*.pdf
+
+#
+**/*.gz
+
