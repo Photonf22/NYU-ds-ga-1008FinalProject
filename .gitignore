@@ -214,7 +214,6 @@ __marimo__/
 **/*.toc
 **/*.lot
 **/*.lof
-**/*.sty
 
 # PDFs
 **/*.pdf
