@@ -10,9 +10,9 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
-  {name = "Long Quang", email = "longquang@nyu.edu"}
-  {name = "Alejandro Sanchez", email = "aas10269@nyu.edu"}
-  {name = "Amogh Gulati", email = "ag11542@nyu.edu"}
+  {name = "Long Quang", email = "longquang@nyu.edu"},
+  {name = "Alejandro Sanchez", email = "aas10269@nyu.edu"},
+  {name = "Amogh Gulati", email = "ag11542@nyu.edu"},
 ]
 dependencies = [
   "numpy>=1.23",
@@ -21,7 +21,6 @@ dependencies = [
   "torch>=2.1",
   "torchvision",
   "torchtext",
-  "torchviz"
   "tqdm",
   "opencv-python",
   "seaborn",
@@ -30,6 +29,7 @@ dependencies = [
   "pyyaml",
   "ipympl",
   "librosa",
+  "einops>=0.7",
 ]
 
 [project.optional-dependencies]
@@ -44,7 +44,7 @@ docs = [
   "myst-nb>=1.1",
   "sphinx-book-theme>=1.1",
   "nbsphinx>=0.9",
-  "ipykernel>=6.29"
+  "ipykernel>=6.29",
   "ipywidgets",
   "juptyer",
   "juptyerlab",
@@ -52,7 +52,7 @@ docs = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ijepa"]
+packages = ["src/wejepa"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
