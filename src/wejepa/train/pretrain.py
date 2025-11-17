@@ -19,7 +19,7 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from ..config import IJepaConfig, default_config
-from ..data import create_pretraining_dataloader
+from ..datasets import create_pretraining_dataloader
 from ..model import IJEPA_base
 
 

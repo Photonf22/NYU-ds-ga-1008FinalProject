@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 import torchvision
 
 from ..config import IJepaConfig, default_config
-from ..data.cifar import build_eval_transform, build_train_transform
+from ..datasets.cifar import build_eval_transform, build_train_transform
 from ..model import IJEPA_base
 
 

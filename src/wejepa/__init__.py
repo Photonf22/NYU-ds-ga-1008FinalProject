@@ -8,7 +8,7 @@ from .config import (
     HardwareConfig,
     default_config,
 )
-from .data import IJEPADataset, create_pretraining_dataloader
+from .datasets import IJEPADataset, create_pretraining_dataloader
 from .model import IJEPA_base
 from .train.pretrain import launch_pretraining
 

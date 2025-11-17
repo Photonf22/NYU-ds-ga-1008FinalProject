@@ -4,7 +4,7 @@ Reference implementation of a lightweight Image-based Joint-Embedding Predictive
 use for the DS-GA-1008 final project.
 
 * configuration objects that capture every important hyper-parameter (`wejepa.config`),
-* a CIFAR-100 based unlabeled pretraining pipeline with distributed support (`wejepa.train.pretrain`),
+* a dataset based unlabeled pretraining pipeline with distributed support (`wejepa.train.pretrain`),
 * fine-tuning helpers and linear-probe utilities (`wejepa.train.finetune`), and
 * smoke tests plus documentation to make contributions safer.
 
@@ -31,7 +31,7 @@ configuration without touching any data via the `--print-config` flag:
 python -m wejepa.train.pretrain --print-config
 ```
 
-To launch a real run you only need to make sure the CIFAR-100 root exists and then call
+To launch a real run you only need to make sure the dataset root exists and then call
 `launch_pretraining` through the CLI.  The example below downloads data into
 `/path/to/datasets` and runs the default single GPU/CPU training loop using fake data for
 quick smoke testing.
@@ -58,7 +58,7 @@ Checkpoints (student, teacher and predictor weights) are stored in
 
 Fine-tuning utilities live next to the pretraining code.  The module exposes a
 `FinetuneConfig` dataclass, a `LinearProbe` model and the `train_linear_probe` helper
-which trains a frozen backbone plus linear head on labeled CIFAR-100 data.
+which trains a frozen backbone plus linear head on labeled data.
 
 ```bash
 python -m wejepa.train.finetune \
@@ -83,7 +83,7 @@ ft_cfg = FinetuneConfig(
 train_linear_probe(ft_cfg)
 ```
 
-The helper automatically downloads CIFAR-100 labels if needed and reports
+The helper automatically downloads dataset labels if needed and reports
 training/validation accuracy every epoch.
 
 ## Running inference
@@ -127,7 +127,7 @@ pytest -q
 ```
 
 The dataset/dataloader smoke tests use `torchvision.datasets.FakeData`, so they pass even
-without downloading CIFAR-100 and finish in a couple of seconds.  For configuration
+without downloading datasets and finish in a couple of seconds.  For configuration
 sanity checks you can also run:
 
 ```bash

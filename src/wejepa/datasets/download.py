@@ -1,4 +1,4 @@
-"""CIFAR-100 download helpers and CLI entrypoints.
+"""Data download helpers and CLI entrypoints.
 
 This module bundles the dataset bootstrap logic used by ``wejepa`` so that new
 machines can be primed with the expected CIFAR-100 layout before running the
@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Iterable, Mapping, MutableMapping
 
 from torchvision.datasets import CIFAR100
+import datasets
 
 _VALID_SPLITS = {"train", "test"}
 
@@ -24,17 +25,17 @@ def _normalize_root(dataset_root: str | Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     return root
 
-
-def download_cifar100(
+def download(
     dataset_root: str | Path,
+    dataset_name: str = "cifar100",
     splits: Iterable[str] = ("train", "test"),
 ) -> Mapping[str, Path]:
-    """Download CIFAR-100 splits into ``dataset_root`` if needed.
+    """Download datasets splits into ``dataset_root`` if needed.
 
     Parameters
     ----------
     dataset_root:
-        Directory where torchvision should store the CIFAR-100 archives.
+        Directory where we store the archives.
     splits:
         Iterable containing any combination of ``"train"`` or ``"test"``.
 
@@ -51,15 +52,18 @@ def download_cifar100(
         if split not in _VALID_SPLITS:
             raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
         train_flag = split == "train"
-        CIFAR100(root=str(root), train=train_flag, download=True)
+        if dataset_name == "cifar100":
+            CIFAR100(root=str(root), train=train_flag, download=True)
+        else:
+            datasets.load_dataset(dataset_name, split=split, cache_dir=str(root))
+
         downloaded[split] = root
     return downloaded
-
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Download the CIFAR-100 dataset so wejepa pretraining can reuse it "
+            "Download the datasets so wejepa pretraining can reuse it "
             "without hitting the network."
         )
     )
@@ -67,14 +71,21 @@ def _parse_args() -> argparse.Namespace:
         "--dataset-root",
         type=Path,
         default=Path.cwd() / "data",
-        help="Folder that should contain the torchvision CIFAR-100 download",
+        help="Folder that should contain the dataset downloads",
+    )
+    parser.add_argument(
+        "--dataset-name",
+        type=str,
+        default="cifar100",
+        help="Name of the dataset to download "
+        "(default: cifar100, class dataset: tsbpp/fall2025_deeplearning)",
     )
     parser.add_argument(
         "--splits",
         nargs="+",
         default=("train", "test"),
         choices=sorted(_VALID_SPLITS),
-        help="Which CIFAR-100 splits to materialize.",
+        help="Which dataset splits to materialize.",
     )
     return parser.parse_args()
 
@@ -83,7 +94,7 @@ def main() -> None:
     """Command-line entrypoint used via ``python -m wejepa.data.download``."""
 
     args = _parse_args()
-    downloads = download_cifar100(args.dataset_root, splits=args.splits)
+    downloads = download(args.dataset_root, args.dataset_name, splits=args.splits)
     for split, root in downloads.items():
         print(f"Split '{split}' available under {root}")
 
