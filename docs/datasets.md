@@ -12,6 +12,12 @@ Use the built-in CLI to materialize the train and test archives:
 python -m wejepa.datasets.download --dataset-root ./data
 ```
 
+The default dataset is CIFAR-100, to download the class project public train/test datasets, you can do something like:
+
+```bash
+python -m wejepa.datasets.download --dataset-root ./data --dataset-name tsbpp/fall2025_deeplearning --splits train
+```
+
 The command only downloads missing files, so it is safe to re-run when syncing a
 shared filesystem.  Pass `--splits train` to fetch just the training archive or
 `--splits test` to refresh the held-out split.
