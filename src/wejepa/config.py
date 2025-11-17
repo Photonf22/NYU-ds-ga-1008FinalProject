@@ -19,6 +19,7 @@ class DataConfig:
     """Data-related hyperparameters."""
 
     dataset_root: str = field(default_factory=_default_dataset_root)
+    dataset_name: str = "cifar10"
     image_size: int = 32
     train_batch_size: int = 256
     eval_batch_size: int = 512

@@ -1,4 +1,5 @@
 """Data loading utilities for wejepa."""
+from datasets import load_dataset
 from .cifar import (
     IJEPADataset,
     build_train_transform,

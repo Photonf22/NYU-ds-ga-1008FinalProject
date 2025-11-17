@@ -288,7 +288,7 @@ def launch_pretraining(cfg: Optional[IJepaConfig] = None) -> None:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Pretrain the WE-JEPA encoder on CIFAR-100")
+    parser = argparse.ArgumentParser(description="Pretrain the WE-JEPA encoder on requested dataset")
     parser.add_argument("--config", type=str, help="Path to a JSON config file", default=None)
     parser.add_argument(
         "--print-config",

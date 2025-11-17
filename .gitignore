@@ -223,3 +223,6 @@ __marimo__/
 
 #### Ignore Data files ####
 data/
+
+## weights/checkpoints
+**/*.pt
