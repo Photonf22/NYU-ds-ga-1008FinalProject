@@ -221,3 +221,5 @@ __marimo__/
 #
 **/*.gz
 
+#### Ignore Data files ####
+data/
