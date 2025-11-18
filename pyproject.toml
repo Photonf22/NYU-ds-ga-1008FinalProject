@@ -31,6 +31,7 @@ dependencies = [
   "librosa",
   "einops>=0.7",
   "datasets>=2.16",
+  "huggingface_hub",
 ]
 
 [project.optional-dependencies]

@@ -1,7 +1,7 @@
 # Dataset setup
 
 All helpers in
-`wejepa.data` assume the dataset lives under `cfg.data.dataset_root` (defaults to
+`wejepa.datasets` assume the dataset lives under `cfg.data.dataset_root` (defaults to
 `<repo>/data`).
 
 ## One-time download
