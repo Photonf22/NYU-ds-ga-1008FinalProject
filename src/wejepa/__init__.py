@@ -9,7 +9,7 @@ from .config import (
     default_config,
 )
 from .backbones import available_backbones, build_backbone, resolve_preprocess_transforms
-from .datasets import IJEPADataset, create_pretraining_dataloader
+from .datasets import IJEPACIFARDataset, IJEPAHFDataset, create_pretraining_dataloader
 from .model import IJEPA_base
 from .train.pretrain import launch_pretraining
 
@@ -24,7 +24,8 @@ __all__ = [
     "available_backbones",
     "build_backbone",
     "resolve_preprocess_transforms",
-    "IJEPADataset",
+    "IJEPACIFARDataset",
+    "IJEPAHFDataset",
     "create_pretraining_dataloader",
     "IJEPA_base",
     "launch_pretraining",

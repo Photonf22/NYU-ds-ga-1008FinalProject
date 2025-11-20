@@ -2,9 +2,6 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
-from typing import Optional, Tuple
-
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -15,15 +12,14 @@ import torch.distributed as dist
 
 from ..config import IJepaConfig
 
-
-class IJEPADataset(Dataset):
-    """Return unlabeled images suitable for JEPA-style training."""
+class IJEPACIFARDataset(Dataset):
+    """Return unlabeled images suitable for JEPA-style training (CIFAR/FakeData)."""
 
     def __init__(
         self,
         cfg: IJepaConfig,
         train: bool = True,
-        transform: Optional[T.Compose] = None,
+        transform: T.Compose = None,
         download: bool = False,
     ) -> None:
         self.cfg = cfg
@@ -32,7 +28,7 @@ class IJEPADataset(Dataset):
         )
         image_size = cfg.data.image_size
         if cfg.data.use_fake_data:
-            self.dataset: Dataset = torchvision.datasets.FakeData(
+            self.dataset = torchvision.datasets.FakeData(
                 size=cfg.data.fake_data_size,
                 image_size=(3, image_size, image_size),
                 num_classes=cfg.data.fake_data_size,
@@ -46,17 +42,14 @@ class IJEPADataset(Dataset):
                 download=download,
             )
 
-    def __len__(self) -> int:
+    def __len__(self):
         return len(self.dataset)
 
-    def __getitem__(self, index: int):
+    def __getitem__(self, index):
         img, *_ = self.dataset[index]
-        # both the unlabeled CIFAR dataset and FakeData return (img, label)
-        # but pretraining only consumes the image tensor.
         if isinstance(img, tuple):
             img = img[0]
         return img
-
 
 def build_train_transform(cfg: IJepaConfig) -> T.Compose:
     dcfg = cfg.data
@@ -72,42 +65,34 @@ def build_train_transform(cfg: IJepaConfig) -> T.Compose:
                 0.2 * dcfg.color_jitter,
             )
         )
-    transforms.extend(
-        [
-            T.ToTensor(),
-            T.Normalize(dcfg.normalization_mean, dcfg.normalization_std),
-        ]
-    )
+    transforms.extend([
+        T.ToTensor(),
+        T.Normalize(dcfg.normalization_mean, dcfg.normalization_std),
+    ])
     return T.Compose(transforms)
-
 
 def build_eval_transform(cfg: IJepaConfig) -> T.Compose:
     dcfg = cfg.data
-    return T.Compose(
-        [
-            T.Resize(dcfg.image_size),
-            T.ToTensor(),
-            T.Normalize(dcfg.normalization_mean, dcfg.normalization_std),
-        ]
-    )
-
+    return T.Compose([
+        T.Resize(dcfg.image_size),
+        T.ToTensor(),
+        T.Normalize(dcfg.normalization_mean, dcfg.normalization_std),
+    ])
 
 def _worker_init_fn(worker_id: int) -> None:
-    # dataloader worker seed setup to avoid duplication
     seed = torch.initial_seed() % 2**32
     np.random.seed(seed)
     random.seed(seed)
-
 
 def create_pretraining_dataloader(
     cfg: IJepaConfig,
     rank: int = 0,
     world_size: int = 1,
-) -> Tuple[DataLoader, Optional[DistributedSampler]]:
-    dataset = IJEPADataset(cfg, train=True, download=rank == 0)
+):
+    dataset = IJEPACIFARDataset(cfg, train=True, download=rank == 0)
     if world_size > 1 and dist.is_available() and dist.is_initialized():
         dist.barrier()
-    sampler: Optional[DistributedSampler] = None
+    sampler = None
     if world_size > 1:
         sampler = DistributedSampler(
             dataset,
@@ -136,9 +121,8 @@ def create_pretraining_dataloader(
     loader = DataLoader(**loader_kwargs)
     return loader, sampler
 
-
 __all__ = [
-    "IJEPADataset",
+    "IJEPACIFARDataset",
     "build_train_transform",
     "build_eval_transform",
     "create_pretraining_dataloader",
