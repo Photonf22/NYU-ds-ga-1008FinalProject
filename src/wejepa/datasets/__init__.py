@@ -9,7 +9,6 @@ from .cifar import (
 from .hf import (
     IJEPAHFDataset,
     build_train_transform,
-    build_eval_transform,
     create_pretraining_dataloader,
 )
 from .loader import create_pretraining_dataloader
