@@ -8,6 +8,7 @@ from .config import (
     HardwareConfig,
     default_config,
 )
+from .backbones import available_backbones, build_backbone, resolve_preprocess_transforms
 from .datasets import IJEPADataset, create_pretraining_dataloader
 from .model import IJEPA_base
 from .train.pretrain import launch_pretraining
@@ -20,6 +21,9 @@ __all__ = [
     "OptimizerConfig",
     "HardwareConfig",
     "default_config",
+    "available_backbones",
+    "build_backbone",
+    "resolve_preprocess_transforms",
     "IJEPADataset",
     "create_pretraining_dataloader",
     "IJEPA_base",

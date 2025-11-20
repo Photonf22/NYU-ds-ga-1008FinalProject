@@ -9,6 +9,8 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 
+from wejepa.backbones import build_backbone
+
 
 class PatchEmbed(nn.Module):
     """Turn an image into non-overlapping patch tokens."""
@@ -120,24 +122,34 @@ class IJEPA_base(nn.Module):
         M: int = 4,
         mode: str = "train",
         layer_dropout: float = 0.0,
+        backbone: str = None,
+        pretrained: bool = False,
     ) -> None:
         super().__init__()
         del layer_dropout  # kept for backwards compatibility
         self.M = M
         self.mode = mode
-        self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
-        self.patch_dim = self.patch_embed.patch_shape
-        self.num_tokens = self.patch_dim[0] * self.patch_dim[1]
-        self.pos_embedding = nn.Parameter(torch.randn(1, self.num_tokens, embed_dim))
-        self.mask_token = nn.Parameter(torch.randn(1, 1, embed_dim))
-        nn.init.trunc_normal_(self.mask_token, std=0.02)
-        self.post_emb_norm = nn.LayerNorm(embed_dim) if post_emb_norm else nn.Identity()
-        self.norm = nn.LayerNorm(embed_dim)
-        self.student_encoder = TransformerEncoder(embed_dim, enc_depth, num_heads)
-        self.teacher_encoder = copy.deepcopy(self.student_encoder)
-        for param in self.teacher_encoder.parameters():
-            param.requires_grad = False
-        self.predictor = Predictor(embed_dim, num_heads, pred_depth)
+
+        if backbone is not None:
+            self.backbone, self.feature_dim = build_backbone(
+                backbone,
+                pretrained=pretrained,
+                num_classes=None,
+            )
+        else:
+            self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
+            self.patch_dim = self.patch_embed.patch_shape
+            self.num_tokens = self.patch_dim[0] * self.patch_dim[1]
+            self.pos_embedding = nn.Parameter(torch.randn(1, self.num_tokens, embed_dim))
+            self.mask_token = nn.Parameter(torch.randn(1, 1, embed_dim))
+            nn.init.trunc_normal_(self.mask_token, std=0.02)
+            self.post_emb_norm = nn.LayerNorm(embed_dim) if post_emb_norm else nn.Identity()
+            self.norm = nn.LayerNorm(embed_dim)
+            self.student_encoder = TransformerEncoder(embed_dim, enc_depth, num_heads)
+            self.teacher_encoder = copy.deepcopy(self.student_encoder)
+            for param in self.teacher_encoder.parameters():
+                param.requires_grad = False
+            self.predictor = Predictor(embed_dim, num_heads, pred_depth)
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
@@ -228,7 +240,10 @@ class IJEPA_base(nn.Module):
         context_aspect_ratio: float = 1.0,
         context_scale: float = 0.9,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        tokens = self.patch_embed(x)
+        if self.backbone is not None:
+            tokens = self.backbone(x)
+        else:
+            tokens = self.patch_embed(x)
         tokens = tokens + self.pos_embedding
         tokens = self.post_emb_norm(tokens)
         if self.mode == "test":
@@ -251,5 +266,8 @@ class IJEPA_base(nn.Module):
             prediction_blocks[i] = self.predictor(context_encoding, target_masks)
         return prediction_blocks, target_blocks
 
+    # print number of parameters
+    def count_parameters(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 __all__ = ["IJEPA_base", "PatchEmbed"]

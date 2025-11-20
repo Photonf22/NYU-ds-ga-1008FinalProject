@@ -88,6 +88,8 @@ def _build_model(cfg: IJepaConfig) -> IJEPA_base:
         post_emb_norm=mcfg.post_emb_norm,
         M=cfg.mask.num_target_blocks,
         layer_dropout=mcfg.layer_dropout,
+        backbone=mcfg.classification_backbone,
+        pretrained=mcfg.classification_pretrained,
     )
     return model
 
@@ -210,6 +212,9 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
         if torch.cuda.is_available():
             torch.cuda.set_device(device)
     model = _build_model(cfg).to(device)
+    # print model parameter count
+    if rank == 0:
+        print(f"Model has {model.count_parameters():,} trainable parameters.")
     if cfg.hardware.compile_model and hasattr(torch, "compile"):
         model = torch.compile(model)  # type: ignore[attr-defined]
     if world_size > 1:

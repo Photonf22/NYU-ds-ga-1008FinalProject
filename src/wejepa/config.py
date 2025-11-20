@@ -61,6 +61,9 @@ class ModelConfig:
     num_heads: int = 6
     post_emb_norm: bool = False
     layer_dropout: float = 0.0
+    classification_backbone: str = "vit_b_16"
+    classification_num_classes: int = 1000
+    classification_pretrained: bool = True
 
 
 @dataclass
