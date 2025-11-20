@@ -48,8 +48,8 @@ docs = [
   "nbsphinx>=0.9",
   "ipykernel>=6.29",
   "ipywidgets",
-  "juptyer",
-  "juptyerlab",
+  "jupyter",
+  "jupyterlab",
   "jupytext>=1.15"
 ]
 
