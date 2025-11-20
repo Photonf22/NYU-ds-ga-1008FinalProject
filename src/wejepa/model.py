@@ -136,6 +136,13 @@ class IJEPA_base(nn.Module):
                 pretrained=pretrained,
                 num_classes=None,
             )
+            self.pos_embedding = None
+            self.mask_token = None
+            self.post_emb_norm = None
+            self.norm = None
+            self.student_encoder = None
+            self.teacher_encoder = None
+            self.predictor = None
         else:
             self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
             self.patch_dim = self.patch_embed.patch_shape
@@ -243,17 +250,27 @@ class IJEPA_base(nn.Module):
         if self.backbone is not None:
             tokens = self.backbone(x)
         else:
-            tokens = self.patch_embed(x)
-        tokens = tokens + self.pos_embedding
-        tokens = self.post_emb_norm(tokens)
+            tokens = self.patch_embed(x) if self.patch_embed is not None else x
+        if self.pos_embedding is not None:
+            tokens = tokens + self.pos_embedding
+        if self.post_emb_norm is not None:
+            tokens = self.post_emb_norm(tokens)
+
         if self.mode == "test":
-            return self.student_encoder(tokens)
-        target_blocks, target_patches, all_patches = self.get_target_block(
+            if self.student_encoder is not None:
+                return self.student_encoder(tokens)
+            else:
+                return tokens  # or handle backbone output as needed
+
+        if self.teacher_encoder is not None and self.patch_dim is not None:
+            target_blocks, target_patches, all_patches = self.get_target_block(
             self.teacher_encoder, tokens, self.patch_dim, target_aspect_ratio, target_scale, self.M
-        )
-        context_block = self.get_context_block(
+            )
+        else:
+            target_blocks, target_patches, all_patches = None, None, None  # or handle backbone case
+            context_block = self.get_context_block(
             tokens, self.patch_dim, context_aspect_ratio, context_scale, all_patches
-        )
+            )
         context_encoding = self.student_encoder(context_block)
         context_encoding = self.norm(context_encoding)
         m, bsz, n_tok, embed_dim = target_blocks.shape
