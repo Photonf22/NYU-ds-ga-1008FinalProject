@@ -6,7 +6,7 @@ from .cifar import (
     build_eval_transform,
     create_pretraining_dataloader,
 )
-from .hf import IJEPAHFDataset (
+from .hf import (
     IJEPAHFDataset,
     build_train_transform,
     build_eval_transform,
