@@ -91,6 +91,8 @@ def load_backbone_from_checkpoint(checkpoint_path: str, cfg: Optional[IJepaConfi
         post_emb_norm=cfg.model.post_emb_norm,
         M=cfg.mask.num_target_blocks,
         layer_dropout=cfg.model.layer_dropout,
+        backbone=cfg.model.classification_backbone,
+        pretrained=cfg.model.classification_pretrained,
     )
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     student_state = checkpoint.get("student") or checkpoint
@@ -145,7 +147,7 @@ def _evaluate(model: LinearProbe, loader: DataLoader, device: torch.device) -> f
     return total_correct / max(1, total)
 
 
-def train_linear_probe(ft_cfg: Optional[FinetuneConfig] = None) -> None:
+def train_linear_probe(ft_cfg: Optional[FinetuneConfig] = None) -> LinearProbe:
     ft_cfg = ft_cfg or FinetuneConfig()
     cfg = ft_cfg.ijepa
     if ft_cfg.checkpoint_path is None:
@@ -170,6 +172,7 @@ def train_linear_probe(ft_cfg: Optional[FinetuneConfig] = None) -> None:
             f"[Linear probe] Epoch {epoch + 1}/{ft_cfg.epochs} "
             f"| loss={loss:.4f} | train_acc={acc:.3f} | val_acc={val_acc:.3f}"
         )
+        return model
 
 
 def _parse_args() -> argparse.Namespace:
