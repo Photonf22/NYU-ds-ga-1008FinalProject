@@ -129,6 +129,8 @@ class IJEPA_base(nn.Module):
         del layer_dropout  # kept for backwards compatibility
         self.M = M
         self.mode = mode
+        self.backbone = None
+        self.patch_embed = None
 
         if backbone is not None:
             self.backbone, self.feature_dim = build_backbone(
@@ -136,27 +138,30 @@ class IJEPA_base(nn.Module):
                 pretrained=pretrained,
                 num_classes=None,
             )
-            self.pos_embedding = None
-            self.mask_token = None
-            self.post_emb_norm = None
-            self.norm = None
-            self.student_encoder = None
-            self.teacher_encoder = None
-            self.predictor = None
+            embed_dim = self.backbone.hidden_dim 
+            img_size = self.backbone.image_size   
+            patch_size = self.backbone.patch_size 
+
+            # so that everything downstream sees compatible shapes
+            self.patch_dim = (img_size // patch_size, img_size // patch_size)
+            self.num_tokens = self.patch_dim[0] * self.patch_dim[1]
+            self.patch_embed = None
         else:
             self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
             self.patch_dim = self.patch_embed.patch_shape
             self.num_tokens = self.patch_dim[0] * self.patch_dim[1]
-            self.pos_embedding = nn.Parameter(torch.randn(1, self.num_tokens, embed_dim))
-            self.mask_token = nn.Parameter(torch.randn(1, 1, embed_dim))
-            nn.init.trunc_normal_(self.mask_token, std=0.02)
-            self.post_emb_norm = nn.LayerNorm(embed_dim) if post_emb_norm else nn.Identity()
-            self.norm = nn.LayerNorm(embed_dim)
-            self.student_encoder = TransformerEncoder(embed_dim, enc_depth, num_heads)
-            self.teacher_encoder = copy.deepcopy(self.student_encoder)
-            for param in self.teacher_encoder.parameters():
-                param.requires_grad = False
-            self.predictor = Predictor(embed_dim, num_heads, pred_depth)
+
+        self.pos_embedding = nn.Parameter(torch.randn(1, self.num_tokens, embed_dim))
+        self.mask_token = nn.Parameter(torch.randn(1, 1, embed_dim))
+        nn.init.trunc_normal_(self.mask_token, std=0.02)
+        
+        self.post_emb_norm = nn.LayerNorm(embed_dim) if post_emb_norm else nn.Identity()
+        self.norm = nn.LayerNorm(embed_dim)
+        self.student_encoder = TransformerEncoder(embed_dim, enc_depth, num_heads)
+        self.teacher_encoder = copy.deepcopy(self.student_encoder)
+        for param in self.teacher_encoder.parameters():
+            param.requires_grad = False
+        self.predictor = Predictor(embed_dim, num_heads, pred_depth)
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
@@ -247,30 +252,58 @@ class IJEPA_base(nn.Module):
         context_aspect_ratio: float = 1.0,
         context_scale: float = 0.9,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        # get tokens from either backbone or PatchEmbed
         if self.backbone is not None:
-            tokens = self.backbone(x)
+            tokens = self.backbone(x)                     # B x N x D
+        elif self.patch_embed is not None:
+            tokens = self.patch_embed(x)                  # B x N x D
         else:
-            tokens = self.patch_embed(x) if self.patch_embed is not None else x
-        if self.pos_embedding is not None:
-            tokens = tokens + self.pos_embedding
-        if self.post_emb_norm is not None:
-            tokens = self.post_emb_norm(tokens)
+            tokens = x
 
-        if self.mode == "test":
-            if self.student_encoder is not None:
-                return self.student_encoder(tokens)
-            else:
-                return tokens  # or handle backbone output as needed
+        # add positional embeddings and norm
+        tokens = tokens + self.pos_embedding              # B x N x D
+        tokens = self.post_emb_norm(tokens)
 
-        if self.teacher_encoder is not None and self.patch_dim is not None:
-            target_blocks, target_patches, all_patches = self.get_target_block(
-            self.teacher_encoder, tokens, self.patch_dim, target_aspect_ratio, target_scale, self.M
-            )
-        else:
-            target_blocks, target_patches, all_patches = None, None, None  # or handle backbone case
-            context_block = self.get_context_block(
-            tokens, self.patch_dim, context_aspect_ratio, context_scale, all_patches
-            )
+        # use the *same* block selection for both modes
+        target_blocks, target_patches, all_patches = self.get_target_block(
+            self.teacher_encoder,
+            tokens,
+            self.patch_dim,
+            target_aspect_ratio,
+            target_scale,
+            self.M,
+        )
+        context_block = self.get_context_block(
+            tokens,
+            self.patch_dim,
+            context_aspect_ratio,
+            context_scale,
+            all_patches,
+        ) 
+        # if self.backbone is not None:
+        #     tokens = self.backbone(x)
+        # else:
+        #     tokens = self.patch_embed(x) if self.patch_embed is not None else x
+        # if self.pos_embedding is not None:
+        #     tokens = tokens + self.pos_embedding
+        # if self.post_emb_norm is not None:
+        #     tokens = self.post_emb_norm(tokens)
+
+        # if self.mode == "test":
+        #     if self.student_encoder is not None:
+        #         return self.student_encoder(tokens)
+        #     else:
+        #         return tokens  # or handle backbone output as needed
+
+        # if self.teacher_encoder is not None and self.patch_dim is not None:
+        #     target_blocks, target_patches, all_patches = self.get_target_block(
+        #     self.teacher_encoder, tokens, self.patch_dim, target_aspect_ratio, target_scale, self.M
+        #     )
+        # else:
+        #     target_blocks, target_patches, all_patches = None, None, None  # or handle backbone case
+        #     context_block = self.get_context_block(
+        #     tokens, self.patch_dim, context_aspect_ratio, context_scale, all_patches
+        #     )
         context_encoding = self.student_encoder(context_block)
         context_encoding = self.norm(context_encoding)
         m, bsz, n_tok, embed_dim = target_blocks.shape

@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
+import torch
 import torch.nn as nn
 from torchvision import transforms
 from torchvision.models import (
@@ -21,7 +22,37 @@ from torchvision.models import (
     vit_l_16,
 )
 
+class ViTTokenBackbone(nn.Module):
+    """
+    Wrap a torchvision ViT to produce patch tokens B x N x D and expose
+    hidden_dim, image_size, patch_size for JEPA.
+    """
+    def __init__(self, vit: nn.Module, image_size: int = 224, patch_size: int = 16):
+        super().__init__()
+        self.vit = vit
+        self.hidden_dim = vit.hidden_dim        # torchvision vit_b_16 has this
+        self.image_size = image_size
+        self.patch_size = patch_size
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: B x 3 x H x W
+        # Use torchvision ViT internals to get patch tokens before classification head.
+        # This mirrors torchvision's forward but stops before head.
+        x = self.vit._process_input(x)          # B x N x D
+        n = x.shape[1]
+
+        # Add class token and positional encodings as in torchvision
+        batch_class_token = self.vit.class_token.expand(x.shape[0], -1, -1)
+        x = torch.cat([batch_class_token, x], dim=1)  # B x (N+1) x D
+        x = x + self.vit.encoder.pos_embedding[:, : n + 1, :]
+
+        # Run encoder
+        x = self.vit.encoder(x)                 # B x (N+1) x D
+
+        # Drop class token, keep patch tokens
+        patch_tokens = x[:, 1:, :]              # B x N x D
+        return patch_tokens
+    
 @dataclass(frozen=True)
 class BackboneSpec:
     """Metadata describing a torchvision backbone."""
@@ -130,6 +161,20 @@ def build_backbone(
     spec = _BACKBONES[name]
     weights = spec.weights if pretrained else None
     model = spec.build_fn(weights=weights, **kwargs)
+
+    if spec.head_type == "vit":
+        vit = model
+        # infer image/patch size from vit config if available
+        image_size = getattr(vit, "image_size", 224)
+        patch_size = getattr(vit, "patch_size", 16)
+        token_backbone = ViTTokenBackbone(vit, image_size=image_size, patch_size=patch_size)
+        feature_dim = token_backbone.hidden_dim
+        # No classifier head logic needed for JEPA use
+        if freeze_backbone:
+            for p in token_backbone.parameters():
+                p.requires_grad = False
+        return token_backbone, feature_dim
+
     classifier = _get_classifier(model, spec.head_type)
     feature_dim = classifier.in_features  # type: ignore[attr-defined]
     if num_classes is not None and classifier.out_features != num_classes:  # type: ignore[attr-defined]
