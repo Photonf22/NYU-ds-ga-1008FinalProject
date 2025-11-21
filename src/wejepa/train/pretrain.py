@@ -316,7 +316,11 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     if args.print_config:
-        print(default_config().summary())
+        # print(default_config().summary())
+        if args.print_config and args.config:
+            cfg_dict = json.loads(Path(args.config).read_text())
+            cfg = IJepaConfig.from_dict(cfg_dict)
+        print(cfg.summary())
         return
     if args.config:
         cfg_dict = json.loads(Path(args.config).read_text())
