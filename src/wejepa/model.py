@@ -252,7 +252,7 @@ class IJEPA_base(nn.Module):
         context_aspect_ratio: float = 1.0,
         context_scale: float = 0.9,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        print("Forward pass in mode:", self.mode)
+        #print("Forward pass in mode:", self.mode)
         # get tokens from either backbone or PatchEmbed
         if self.backbone is not None:
             tokens = self.backbone(x)                     # B x N x D
@@ -261,13 +261,13 @@ class IJEPA_base(nn.Module):
         else:
             tokens = x
 
-        print("Tokens shape:", tokens.shape)
+        #print("Tokens shape:", tokens.shape)
         # add positional embeddings and norm
         tokens = tokens + self.pos_embedding              # B x N x D
         tokens = self.post_emb_norm(tokens)
 
         # use the *same* block selection for both modes
-        print("Selecting target and context blocks...")
+        #print("Selecting target and context blocks...")
         target_blocks, target_patches, all_patches = self.get_target_block(
             self.teacher_encoder,
             tokens,

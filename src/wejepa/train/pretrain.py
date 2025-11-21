@@ -150,32 +150,32 @@ def train_one_epoch(
     start_time = time.time()
     module = model.module if isinstance(model, DDP) else model
     accum = 1
-    print("Training with accum =", accum)
-    print("Length of data loader:", len(data_loader))
+    #print("Training with accum =", accum)
+    #print("Length of data loader:", len(data_loader))
     # try:
     #     images = next(iter(data_loader))
     #     print("First batch shape:", images.shape)
     # except Exception as e:
     #     print("Error loading batch:", e)
-    for itr, images in enumerate(tqdm(data_loader, desc="Training", total=len(data_loader))):
+    for itr, images in enumerate(tqdm(data_loader, desc="Training", total=len(data_loader), dynamic_ncols=True)):
         images = images.to(device, non_blocking=True)
         schedule_idx = state.step
-        print("Schedule idx:", schedule_idx)
+        #print("Schedule idx:", schedule_idx)
         if schedule_idx < len(lr_schedule):
-            print("Updating learning rate and weight decay")
+            #print("Updating learning rate and weight decay")
             lr = float(lr_schedule[schedule_idx])
             wd = float(wd_schedule[schedule_idx])
             for param_group in optimizer.param_groups:
                 param_group["lr"] = lr
                 param_group["weight_decay"] = wd
-            print("Learning rate:", lr)
+            #print("Learning rate:", lr)
         target_aspect_ratio = random.uniform(*cfg.mask.target_aspect_ratio)
         target_scale = random.uniform(*cfg.mask.target_scale)
         context_scale = random.uniform(*cfg.mask.context_scale)
         context_aspect_ratio = cfg.mask.context_aspect_ratio
         use_amp = cfg.hardware.mixed_precision and device.type == "cuda"
         dtype = torch.bfloat16 if use_amp else None  # or torch.float16 if you prefer
-        print("Using AMP:", use_amp, "with dtype:", dtype)
+        #print("Using AMP:", use_amp, "with dtype:", dtype)
         with amp.autocast("cuda", enabled=use_amp, dtype=dtype):
             preds, targets = module(
                 images,
@@ -185,7 +185,7 @@ def train_one_epoch(
                 context_scale=context_scale,
             )
             loss = criterion(preds, targets) / accum
-        print(f"Iteration {itr + 1}: loss = {loss.item() * accum:.4f}")
+        #print(f"Iteration {itr + 1}: loss = {loss.item() * accum:.4f}")
         if scaler is not None:
             scaler.scale(loss).backward()
         else:
@@ -223,12 +223,12 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
     _set_seed(cfg.hardware.seed, rank)
     # prepare device
     device = torch.device("cuda", rank) if torch.cuda.is_available() else torch.device("cpu")
-    print("Using device:", device)
+    #print("Using device:", device)
     if world_size > 1:
         _setup_distributed(rank, world_size)
         if torch.cuda.is_available():
             torch.cuda.set_device(device)
-    print("Building model...")
+    #print("Building model...")
     model = _build_model(cfg).to(device)
     if rank == 0:
         print(f"Model has {model.count_parameters():,} trainable parameters.")
@@ -237,7 +237,7 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
     if world_size > 1:
         model = DDP(model, device_ids=[device.index] if device.type == "cuda" else None)
     # create optimizer
-    print("Creating optimizer...")
+    #print("Creating optimizer...")
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=cfg.optimizer.base_learning_rate,
@@ -246,7 +246,7 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
         weight_decay=cfg.optimizer.weight_decay,
     )
     # prepare training components
-    print("Preparing data loader...")
+    #print("Preparing data loader...")
     use_amp = cfg.hardware.mixed_precision and device.type == "cuda"
     scaler = amp.GradScaler("cuda", enabled=use_amp)
     data_loader, sampler = create_pretraining_dataloader(cfg, rank=rank, world_size=world_size)
@@ -261,7 +261,7 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
         start_value=cfg.optimizer.start_learning_rate,
     )
     # prepare weight decay and momentum schedules
-    print("Preparing schedules...")
+    #print("Preparing schedules...")
     wd_schedule = _cosine_schedule(
         cfg.optimizer.weight_decay,
         cfg.optimizer.final_weight_decay,
@@ -278,13 +278,13 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
     )
     state = TrainState()
     # training loop
-    print("Starting training...")
+    #print("Starting training...")
     for epoch in range(cfg.optimizer.epochs):
-        print("Epoch", epoch + 1)
+        #print("Epoch", epoch + 1)
         if sampler is not None:
-            print("Setting sampler epoch to", epoch)
+            #print("Setting sampler epoch to", epoch)
             sampler.set_epoch(epoch)
-        print("Running training epoch...")
+        #print("Running training epoch...")
         stats = train_one_epoch(
             model,
             data_loader,
