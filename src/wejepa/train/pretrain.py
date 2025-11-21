@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
+from tqdm import tqdm
 
 import numpy as np
 import torch
@@ -149,29 +150,32 @@ def train_one_epoch(
     start_time = time.time()
     module = model.module if isinstance(model, DDP) else model
     accum = 1
-    for itr, images in enumerate(data_loader):
+    print("Training with accum =", accum)
+    print("Length of data loader:", len(data_loader))
+    # try:
+    #     images = next(iter(data_loader))
+    #     print("First batch shape:", images.shape)
+    # except Exception as e:
+    #     print("Error loading batch:", e)
+    for itr, images in enumerate(tqdm(data_loader, desc="Training", total=len(data_loader))):
         images = images.to(device, non_blocking=True)
         schedule_idx = state.step
+        print("Schedule idx:", schedule_idx)
         if schedule_idx < len(lr_schedule):
+            print("Updating learning rate and weight decay")
             lr = float(lr_schedule[schedule_idx])
             wd = float(wd_schedule[schedule_idx])
             for param_group in optimizer.param_groups:
                 param_group["lr"] = lr
                 param_group["weight_decay"] = wd
+            print("Learning rate:", lr)
         target_aspect_ratio = random.uniform(*cfg.mask.target_aspect_ratio)
         target_scale = random.uniform(*cfg.mask.target_scale)
         context_scale = random.uniform(*cfg.mask.context_scale)
         context_aspect_ratio = cfg.mask.context_aspect_ratio
         use_amp = cfg.hardware.mixed_precision and device.type == "cuda"
-        # with autocast(enabled=use_amp):
-        #     preds, targets = module(
-        #         images,
-        #         target_aspect_ratio=target_aspect_ratio,
-        #         target_scale=target_scale,
-        #         context_aspect_ratio=context_aspect_ratio,
-        #         context_scale=context_scale,
-        #     )
         dtype = torch.bfloat16 if use_amp else None  # or torch.float16 if you prefer
+        print("Using AMP:", use_amp, "with dtype:", dtype)
         with amp.autocast("cuda", enabled=use_amp, dtype=dtype):
             preds, targets = module(
                 images,
@@ -181,6 +185,7 @@ def train_one_epoch(
                 context_scale=context_scale,
             )
             loss = criterion(preds, targets) / accum
+        print(f"Iteration {itr + 1}: loss = {loss.item() * accum:.4f}")
         if scaler is not None:
             scaler.scale(loss).backward()
         else:
@@ -216,19 +221,23 @@ def train_one_epoch(
 def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None:
     cfg = IJepaConfig.from_dict(cfg_dict)
     _set_seed(cfg.hardware.seed, rank)
+    # prepare device
     device = torch.device("cuda", rank) if torch.cuda.is_available() else torch.device("cpu")
+    print("Using device:", device)
     if world_size > 1:
         _setup_distributed(rank, world_size)
         if torch.cuda.is_available():
             torch.cuda.set_device(device)
+    print("Building model...")
     model = _build_model(cfg).to(device)
-    # print model parameter count
     if rank == 0:
         print(f"Model has {model.count_parameters():,} trainable parameters.")
     if cfg.hardware.compile_model and hasattr(torch, "compile"):
         model = torch.compile(model)  # type: ignore[attr-defined]
     if world_size > 1:
         model = DDP(model, device_ids=[device.index] if device.type == "cuda" else None)
+    # create optimizer
+    print("Creating optimizer...")
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=cfg.optimizer.base_learning_rate,
@@ -236,6 +245,8 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
         eps=cfg.optimizer.eps,
         weight_decay=cfg.optimizer.weight_decay,
     )
+    # prepare training components
+    print("Preparing data loader...")
     use_amp = cfg.hardware.mixed_precision and device.type == "cuda"
     scaler = amp.GradScaler("cuda", enabled=use_amp)
     data_loader, sampler = create_pretraining_dataloader(cfg, rank=rank, world_size=world_size)
@@ -249,6 +260,8 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
         warmup_steps,
         start_value=cfg.optimizer.start_learning_rate,
     )
+    # prepare weight decay and momentum schedules
+    print("Preparing schedules...")
     wd_schedule = _cosine_schedule(
         cfg.optimizer.weight_decay,
         cfg.optimizer.final_weight_decay,
@@ -264,9 +277,14 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
         start_value=cfg.optimizer.momentum_teacher,
     )
     state = TrainState()
+    # training loop
+    print("Starting training...")
     for epoch in range(cfg.optimizer.epochs):
+        print("Epoch", epoch + 1)
         if sampler is not None:
+            print("Setting sampler epoch to", epoch)
             sampler.set_epoch(epoch)
+        print("Running training epoch...")
         stats = train_one_epoch(
             model,
             data_loader,
@@ -281,6 +299,7 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
             device,
             rank,
         )
+        print("Epoch completed.")
         if rank == 0 and (epoch + 1) % cfg.hardware.checkpoint_every == 0:
             module = model.module if isinstance(model, DDP) else model
             ckpt_path = save_checkpoint(module, optimizer, state, epoch, cfg)
@@ -315,18 +334,15 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    if args.print_config:
-        # print(default_config().summary())
-        if args.print_config and args.config:
-            cfg_dict = json.loads(Path(args.config).read_text())
-            cfg = IJepaConfig.from_dict(cfg_dict)
-        print(cfg.summary())
-        return
     if args.config:
         cfg_dict = json.loads(Path(args.config).read_text())
         cfg = IJepaConfig.from_dict(cfg_dict)
     else:
         cfg = default_config()
+    if args.print_config:
+        print(cfg.summary())
+        return
+
     launch_pretraining(cfg)
 
 

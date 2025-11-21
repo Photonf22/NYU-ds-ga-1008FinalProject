@@ -19,7 +19,7 @@ class DataConfig:
     """Data-related hyperparameters."""
 
     dataset_root: str = field(default_factory=_default_dataset_root)
-    dataset_name: str = "cifar10"
+    dataset_name: str = "cifar100"
     image_size: int = 32
     train_batch_size: int = 256
     eval_batch_size: int = 512
@@ -61,8 +61,8 @@ class ModelConfig:
     num_heads: int = 6
     post_emb_norm: bool = False
     layer_dropout: float = 0.0
-    classification_backbone: str = "vit_b_16"
-    classification_num_classes: int = 1000
+    classification_backbone: str = None 
+    classification_num_classes: int = 100
     classification_pretrained: bool = True
 
 

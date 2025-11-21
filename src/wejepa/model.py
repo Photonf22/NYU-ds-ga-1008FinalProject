@@ -252,6 +252,7 @@ class IJEPA_base(nn.Module):
         context_aspect_ratio: float = 1.0,
         context_scale: float = 0.9,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        print("Forward pass in mode:", self.mode)
         # get tokens from either backbone or PatchEmbed
         if self.backbone is not None:
             tokens = self.backbone(x)                     # B x N x D
@@ -260,11 +261,13 @@ class IJEPA_base(nn.Module):
         else:
             tokens = x
 
+        print("Tokens shape:", tokens.shape)
         # add positional embeddings and norm
         tokens = tokens + self.pos_embedding              # B x N x D
         tokens = self.post_emb_norm(tokens)
 
         # use the *same* block selection for both modes
+        print("Selecting target and context blocks...")
         target_blocks, target_patches, all_patches = self.get_target_block(
             self.teacher_encoder,
             tokens,
@@ -280,30 +283,6 @@ class IJEPA_base(nn.Module):
             context_scale,
             all_patches,
         ) 
-        # if self.backbone is not None:
-        #     tokens = self.backbone(x)
-        # else:
-        #     tokens = self.patch_embed(x) if self.patch_embed is not None else x
-        # if self.pos_embedding is not None:
-        #     tokens = tokens + self.pos_embedding
-        # if self.post_emb_norm is not None:
-        #     tokens = self.post_emb_norm(tokens)
-
-        # if self.mode == "test":
-        #     if self.student_encoder is not None:
-        #         return self.student_encoder(tokens)
-        #     else:
-        #         return tokens  # or handle backbone output as needed
-
-        # if self.teacher_encoder is not None and self.patch_dim is not None:
-        #     target_blocks, target_patches, all_patches = self.get_target_block(
-        #     self.teacher_encoder, tokens, self.patch_dim, target_aspect_ratio, target_scale, self.M
-        #     )
-        # else:
-        #     target_blocks, target_patches, all_patches = None, None, None  # or handle backbone case
-        #     context_block = self.get_context_block(
-        #     tokens, self.patch_dim, context_aspect_ratio, context_scale, all_patches
-        #     )
         context_encoding = self.student_encoder(context_block)
         context_encoding = self.norm(context_encoding)
         m, bsz, n_tok, embed_dim = target_blocks.shape

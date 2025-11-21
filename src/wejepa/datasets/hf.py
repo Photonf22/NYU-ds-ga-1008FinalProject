@@ -1,6 +1,8 @@
 """HuggingFace dataset helpers for pretraining."""
 import random
 import numpy as np
+from PIL import Image
+from scipy import io
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
@@ -31,7 +33,17 @@ class IJEPAHFDataset(Dataset):
         return len(self.dataset)
 
     def __getitem__(self, index):
-        img = self.transform(self.dataset[index]["image"])
+        sample = self.dataset[index]
+        img = sample.get("image", None)
+        if img is None:
+            raise ValueError(f"No 'image' field in sample: {sample.keys()}")
+        if isinstance(img, dict):
+            print("Image dict keys:", img.keys())
+            if "bytes" in img:
+                img = Image.open(io.BytesIO(img["bytes"]))
+            else:
+                raise TypeError(f"Unknown image dict format: {img}")
+        img = self.transform(img)
         return img
 
 def build_train_transform(cfg: IJepaConfig) -> T.Compose:

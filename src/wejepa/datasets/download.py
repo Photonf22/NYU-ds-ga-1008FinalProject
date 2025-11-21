@@ -49,10 +49,10 @@ def download(
     root = _normalize_root(dataset_root)
     downloaded: MutableMapping[str, Path] = {}
     for split in splits:
-        if split not in _VALID_SPLITS:
-            raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
-        train_flag = split == "train"
         if dataset_name == "cifar100":
+            if split not in _VALID_SPLITS:
+                raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
+            train_flag = split == "train"
             CIFAR100(root=str(root), train=train_flag, download=True)
         else:
             datasets.load_dataset(dataset_name, split=split, cache_dir=str(root))
@@ -84,7 +84,7 @@ def _parse_args() -> argparse.Namespace:
         "--splits",
         nargs="+",
         default=("train", "test"),
-        choices=sorted(_VALID_SPLITS),
+        # choices=sorted(_VALID_SPLITS),
         help="Which dataset splits to materialize.",
     )
     return parser.parse_args()
