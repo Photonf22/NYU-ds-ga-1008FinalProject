@@ -1,0 +1,58 @@
+# example_hf_config.py
+
+from wejepa.config import IJepaConfig
+
+cfg = IJepaConfig(
+    data=dict(
+        dataset_root="./data",
+        dataset_name="tsbpp/fall2025_deeplearning",
+        image_size=224,
+        train_batch_size=256,
+        eval_batch_size=512,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=2,
+        crop_scale=(0.6, 1.0),
+        color_jitter=0.5,
+        use_color_distortion=True,
+        use_horizontal_flip=True,
+        normalization_mean=[0.485, 0.456, 0.406],
+        normalization_std=[0.229, 0.224, 0.225],
+        use_fake_data=False,
+        fake_data_size=512,
+    ),
+    optimizer=dict(
+        epochs=5,
+        warmup_epochs=1,
+        base_learning_rate=0.001,
+        start_learning_rate=0.0001,
+        final_learning_rate=1e-5,
+        weight_decay=0.05,
+        final_weight_decay=0.2,
+        betas=(0.9, 0.95),
+        eps=1e-8,
+        grad_clip_norm=1.0,
+        momentum_teacher=0.996,
+        momentum_teacher_final=1.0,
+    ),
+    model=dict(
+        img_size=224,
+        patch_size=4,
+        in_chans=3,
+        embed_dim=192,
+        enc_depth=6,
+        pred_depth=4,
+        num_heads=6,
+        post_emb_norm=False,
+        layer_dropout=0.0,
+    ),
+    hardware=dict(
+        seed=42,
+        mixed_precision=True,
+        compile_model=False,
+        log_every=50,
+        checkpoint_every=1,
+        output_dir="./outputs/ijepa",
+    ),
+)
