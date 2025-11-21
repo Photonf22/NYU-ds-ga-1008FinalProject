@@ -15,7 +15,8 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.cuda.amp import GradScaler, autocast
+from torch.cuda.amp import GradScaler
+from torch import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from ..config import IJepaConfig, default_config
@@ -162,7 +163,16 @@ def train_one_epoch(
         context_scale = random.uniform(*cfg.mask.context_scale)
         context_aspect_ratio = cfg.mask.context_aspect_ratio
         use_amp = cfg.hardware.mixed_precision and device.type == "cuda"
-        with autocast(enabled=use_amp):
+        # with autocast(enabled=use_amp):
+        #     preds, targets = module(
+        #         images,
+        #         target_aspect_ratio=target_aspect_ratio,
+        #         target_scale=target_scale,
+        #         context_aspect_ratio=context_aspect_ratio,
+        #         context_scale=context_scale,
+        #     )
+        dtype = torch.bfloat16 if use_amp else None  # or torch.float16 if you prefer
+        with amp.autocast("cuda", enabled=use_amp, dtype=dtype):
             preds, targets = module(
                 images,
                 target_aspect_ratio=target_aspect_ratio,
@@ -227,7 +237,7 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
         weight_decay=cfg.optimizer.weight_decay,
     )
     use_amp = cfg.hardware.mixed_precision and device.type == "cuda"
-    scaler = GradScaler(enabled=use_amp)
+    scaler = amp.GradScaler("cuda", enabled=use_amp)
     data_loader, sampler = create_pretraining_dataloader(cfg, rank=rank, world_size=world_size)
     steps_per_epoch = len(data_loader)
     total_steps = steps_per_epoch * cfg.optimizer.epochs
