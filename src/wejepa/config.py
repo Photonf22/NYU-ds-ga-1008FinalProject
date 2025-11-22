@@ -1,4 +1,3 @@
-"""Configuration objects for the wejepa package."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
@@ -50,7 +49,7 @@ class MaskConfig:
 
 @dataclass
 class ModelConfig:
-    """Architecture settings for :class:`wejepa.model.IJEPA_base`."""
+    """Architecture settings"""
 
     img_size: int = 32
     patch_size: int = 4
@@ -139,6 +138,17 @@ def default_config() -> IJepaConfig:
     return cfg
 
 
+def hf224_config() -> IJepaConfig:
+    """Configuration tailored for 224x224 Hugging Face image datasets."""
+
+    cfg = default_config()
+    cfg.data.dataset_name = "tsbpp/fall2025_deeplearning"
+    cfg.data.image_size = 224
+    cfg.model.img_size = 224
+    cfg.model.patch_size = 16
+    return cfg
+
+
 __all__ = [
     "IJepaConfig",
     "DataConfig",
@@ -147,4 +157,5 @@ __all__ = [
     "OptimizerConfig",
     "HardwareConfig",
     "default_config",
+    "hf224_config",
 ]

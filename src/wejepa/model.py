@@ -1,4 +1,4 @@
-"""Simplified I-JEPA style encoder used throughout the wejepa package."""
+"""JEPA model implementation"""
 from __future__ import annotations
 
 import copy
@@ -7,9 +7,10 @@ from typing import List, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
 
-from wejepa.backbones import build_backbone
+from wejepa.backbones import build_backbone, choose_num_heads, get_backbone_spec
 
 
 class PatchEmbed(nn.Module):
@@ -107,8 +108,6 @@ class Predictor(nn.Module):
 
 
 class IJEPA_base(nn.Module):
-    """Simplified implementation of the Image-based JEPA architecture."""
-
     def __init__(
         self,
         img_size: int,
@@ -133,17 +132,22 @@ class IJEPA_base(nn.Module):
         self.patch_embed = None
 
         if backbone is not None:
+            spec = get_backbone_spec(backbone)
             self.backbone, self.feature_dim = build_backbone(
                 backbone,
                 pretrained=pretrained,
                 num_classes=None,
             )
-            embed_dim = self.backbone.hidden_dim 
-            img_size = self.backbone.image_size   
-            patch_size = self.backbone.patch_size 
+            embed_dim = self.backbone.hidden_dim
+            img_size = self.backbone.image_size
+            patch_size = self.backbone.patch_size
+            num_heads = choose_num_heads(embed_dim, spec.default_num_heads, num_heads)
 
             # so that everything downstream sees compatible shapes
-            self.patch_dim = (img_size // patch_size, img_size // patch_size)
+            self.patch_dim = getattr(self.backbone, "patch_dim", None) or (
+                img_size // patch_size,
+                img_size // patch_size,
+            )
             self.num_tokens = self.patch_dim[0] * self.patch_dim[1]
             self.patch_embed = None
         else:
@@ -162,6 +166,33 @@ class IJEPA_base(nn.Module):
         for param in self.teacher_encoder.parameters():
             param.requires_grad = False
         self.predictor = Predictor(embed_dim, num_heads, pred_depth)
+
+    def _maybe_resize_positional_embedding(self, tokens: torch.Tensor) -> None:
+        """Resize positional embeddings when backbone token grids differ."""
+
+        seq_len = tokens.shape[1]
+        if seq_len == self.pos_embedding.shape[1]:
+            return
+
+        old_tokens = self.pos_embedding.shape[1]
+        old_h = int(math.sqrt(old_tokens)) or 1
+        old_w = old_tokens // old_h
+
+        new_h = int(math.sqrt(seq_len)) or 1
+        new_w = max(1, seq_len // new_h)
+        if new_h * new_w != seq_len:
+            new_w = math.ceil(seq_len / new_h)
+            new_h = math.ceil(seq_len / new_w)
+
+        pos = self.pos_embedding
+        pos = pos.reshape(1, old_h, old_w, -1).permute(0, 3, 1, 2)
+        pos = F.interpolate(pos, size=(new_h, new_w), mode="bilinear", align_corners=False)
+        pos = pos.permute(0, 2, 3, 1).reshape(1, new_h * new_w, -1)
+
+        # replace parameter so gradients flow to resized tensor
+        self.pos_embedding = nn.Parameter(pos)
+        self.patch_dim = (new_h, new_w)
+        self.num_tokens = new_h * new_w
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
@@ -263,6 +294,7 @@ class IJEPA_base(nn.Module):
 
         #print("Tokens shape:", tokens.shape)
         # add positional embeddings and norm
+        self._maybe_resize_positional_embedding(tokens)
         tokens = tokens + self.pos_embedding              # B x N x D
         tokens = self.post_emb_norm(tokens)
 
@@ -295,8 +327,14 @@ class IJEPA_base(nn.Module):
             prediction_blocks[i] = self.predictor(context_encoding, target_masks)
         return prediction_blocks, target_blocks
 
-    # print number of parameters
+    # number of parameters (student + predictor)
     def count_parameters(self) -> int:
+        student_params = sum(p.numel() for p in self.student_encoder.parameters() if p.requires_grad)
+        predictor_params = sum(p.numel() for p in self.predictor.parameters() if p.requires_grad)
+        return student_params + predictor_params
+
+    # number of trainable parameters including teacher
+    def count_trainable_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 __all__ = ["IJEPA_base", "PatchEmbed"]
