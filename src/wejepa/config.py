@@ -60,9 +60,9 @@ class ModelConfig:
     num_heads: int = 6
     post_emb_norm: bool = False
     layer_dropout: float = 0.0
-    classification_backbone: str = None 
+    classification_backbone: Optional[str] = None
     classification_num_classes: int = 100
-    classification_pretrained: bool = True
+    classification_pretrained: bool = False
 
 
 @dataclass
