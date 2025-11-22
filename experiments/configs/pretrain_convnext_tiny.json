@@ -47,7 +47,7 @@
   },
   "model": {
     "img_size": 224,
-    "patch_size": 16,
+    "patch_size": 32,
     "in_chans": 3,
     "embed_dim": 768,
     "enc_depth": 6,
@@ -55,7 +55,7 @@
     "num_heads": 12,
     "post_emb_norm": false,
     "layer_dropout": 0.0,
-    "classification_backbone": "vit_b_16",
+    "classification_backbone": "convnext_tiny",
     "classification_num_classes": 100,
     "classification_pretrained": true
   },
@@ -83,6 +83,6 @@
     "compile_model": false,
     "log_every": 50,
     "checkpoint_every": 1,
-    "output_dir": "./outputs/ijepa/vit_b_16"
+    "output_dir": "./outputs/ijepa/convnext_tiny"
   }
 }
