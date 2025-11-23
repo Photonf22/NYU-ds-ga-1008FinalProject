@@ -226,3 +226,6 @@ data/
 
 ## weights/checkpoints
 **/*.pt
+
+## client meta data
+**/*.wejepa_config.json
