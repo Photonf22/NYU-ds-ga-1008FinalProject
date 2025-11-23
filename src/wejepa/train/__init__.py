@@ -2,7 +2,9 @@
 
 from .finetune import (
     FinetuneConfig,
+    FinetuneReport,
     LinearProbe,
+    compare_pretrained_vs_scratch,
     create_finetune_dataloader,
     load_backbone_from_checkpoint,
     train_linear_probe,
@@ -13,7 +15,9 @@ from typing import TYPE_CHECKING
 __all__ = [
     "launch_pretraining",
     "FinetuneConfig",
+    "FinetuneReport",
     "LinearProbe",
+    "compare_pretrained_vs_scratch",
     "create_finetune_dataloader",
     "load_backbone_from_checkpoint",
     "train_linear_probe",

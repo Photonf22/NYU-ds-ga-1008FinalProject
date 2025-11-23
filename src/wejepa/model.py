@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import copy
 import math
-from typing import List, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -52,7 +52,9 @@ class TransformerBlock(nn.Module):
     ) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(embed_dim)
-        self.attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True, dropout=dropout)
+        self.attn = nn.MultiheadAttention(
+            embed_dim, num_heads, batch_first=True, dropout=dropout
+        )
         self.norm2 = nn.LayerNorm(embed_dim)
         hidden_dim = int(embed_dim * mlp_ratio)
         self.mlp = nn.Sequential(
@@ -62,11 +64,25 @@ class TransformerBlock(nn.Module):
             nn.Linear(hidden_dim, embed_dim),
             nn.Dropout(dropout),
         )
+        self._attention_recorder: Optional[Callable[[torch.Tensor], None]] = None
+
+    def set_attention_recorder(self, recorder: Optional[Callable[[torch.Tensor], None]]) -> None:
+        """Optionally capture attention weights during the forward pass."""
+
+        self._attention_recorder = recorder
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
         x = self.norm1(x)
-        attn_out, _ = self.attn(x, x, x, need_weights=False)
+        attn_out, attn_weights = self.attn(
+            x,
+            x,
+            x,
+            need_weights=self._attention_recorder is not None,
+            average_attn_weights=False,
+        )
+        if self._attention_recorder is not None and attn_weights is not None:
+            self._attention_recorder(attn_weights.detach())
         x = residual + attn_out
         residual = x
         x = self.norm2(x)
@@ -81,6 +97,10 @@ class TransformerEncoder(nn.Module):
             [TransformerBlock(embed_dim, num_heads) for _ in range(depth)]
         )
         self.norm = nn.LayerNorm(embed_dim)
+
+    def set_attention_recorder(self, recorder: Optional[Callable[[torch.Tensor], None]]) -> None:
+        for layer in self.layers:
+            layer.set_attention_recorder(recorder)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:
@@ -158,7 +178,7 @@ class IJEPA_base(nn.Module):
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_tokens, embed_dim))
         self.mask_token = nn.Parameter(torch.randn(1, 1, embed_dim))
         nn.init.trunc_normal_(self.mask_token, std=0.02)
-        
+
         self.post_emb_norm = nn.LayerNorm(embed_dim) if post_emb_norm else nn.Identity()
         self.norm = nn.LayerNorm(embed_dim)
         self.student_encoder = TransformerEncoder(embed_dim, enc_depth, num_heads)
@@ -166,6 +186,7 @@ class IJEPA_base(nn.Module):
         for param in self.teacher_encoder.parameters():
             param.requires_grad = False
         self.predictor = Predictor(embed_dim, num_heads, pred_depth)
+        self._attention_maps: List[torch.Tensor] = []
 
     def _maybe_resize_positional_embedding(self, tokens: torch.Tensor) -> None:
         """Resize positional embeddings when backbone token grids differ."""
@@ -196,6 +217,18 @@ class IJEPA_base(nn.Module):
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
+
+    def enable_attention_recording(self, enabled: bool = True) -> None:
+        """Toggle attention recording on the student encoder."""
+
+        self._attention_maps = [] if enabled else []
+        recorder = self._attention_maps.append if enabled else None
+        self.student_encoder.set_attention_recorder(recorder)
+
+    def get_recorded_attentions(self) -> List[torch.Tensor]:
+        """Return any attention maps captured during the last forward pass."""
+
+        return list(self._attention_maps)
 
     @torch.no_grad()
     def momentum_update(self, momentum: float) -> None:
@@ -297,6 +330,11 @@ class IJEPA_base(nn.Module):
         self._maybe_resize_positional_embedding(tokens)
         tokens = tokens + self.pos_embedding              # B x N x D
         tokens = self.post_emb_norm(tokens)
+
+        if self.mode == "test":
+            encoded = self.student_encoder(tokens)
+            encoded = self.norm(encoded)
+            return encoded
 
         # use the *same* block selection for both modes
         #print("Selecting target and context blocks...")
