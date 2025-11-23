@@ -226,3 +226,6 @@ data/
 
 ## weights/checkpoints
 **/*.pt
+
+## WSL stuff?
+**/*Zone.Identifier
