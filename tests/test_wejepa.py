@@ -1,5 +1,9 @@
-"""Smoke tests for the wejepa package."""
-from wejepa import IJEPACIFARDataset, IJEPAHFDataset, IJepaConfig, create_pretraining_dataloader, default_config
+import pytest
+
+pytest.importorskip("torch")
+
+from wejepa import IJepaConfig, default_config
+from wejepa.datasets.cifar import IJEPACIFARDataset, create_pretraining_dataloader
 
 
 def _fake_config() -> IJepaConfig:

@@ -1,4 +1,8 @@
-"""Tests for visualization and comparison helpers."""
+import pytest
+
+pytest.importorskip("matplotlib")
+pytest.importorskip("torch")
+
 import matplotlib
 
 matplotlib.use("Agg")
