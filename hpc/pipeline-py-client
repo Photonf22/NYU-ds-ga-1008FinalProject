@@ -18,8 +18,8 @@ import os
 
 ROOT = Path(__file__).resolve().parent
 
-GLOBAL_EXP_DIR = Path(os.environ.get("WEJEPA_EXP") or (ROOT.parent)).resolve()
-PROJECT_DIR = GLOBAL_EXP_DIR.parent
+GLOBAL_EXP_DIR = Path(os.environ.get("WEJEPA_EXP") or (ROOT.parent / "experiments")).resolve()
+PROJECT_DIR = ROOT.parent
 SETTINGS = PROJECT_DIR / ".wejepa_config.json"
 
 CONFIGS_DIR = GLOBAL_EXP_DIR / "configs"
