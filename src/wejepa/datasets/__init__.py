@@ -1,5 +1,6 @@
 """Data loading utilities for wejepa."""
 from datasets import load_dataset
+from huggingface_hub import snapshot_download
 from .cifar import (
     IJEPACIFARDataset,
     build_train_transform,

@@ -9,10 +9,13 @@ run from bare Python environments.
 from __future__ import annotations
 
 import argparse
+import zipfile, tarfile
+import tqdm
 from pathlib import Path
-from typing import Iterable, Mapping, MutableMapping
+from typing import Iterable, Mapping, MutableMapping, Optional
 
 from torchvision.datasets import CIFAR100
+import huggingface_hub
 import datasets
 
 _VALID_SPLITS = {"train", "test"}
@@ -28,6 +31,7 @@ def _normalize_root(dataset_root: str | Path) -> Path:
 def download(
     dataset_root: str | Path,
     dataset_name: str = "cifar100",
+    snapshot_download: Optional[bool] = False,
     splits: Iterable[str] = ("train", "test"),
 ) -> Mapping[str, Path]:
     """Download datasets splits into ``dataset_root`` if needed.
@@ -48,16 +52,59 @@ def download(
 
     root = _normalize_root(dataset_root)
     downloaded: MutableMapping[str, Path] = {}
+    def is_hf_format(directory: Path):
+        # Check for common Hugging Face dataset file types or image folders
+        for ext in [".csv", ".json", ".parquet"]:
+            if any(directory.glob(f"*{ext}")):
+                return True
+        # Check for at least one subdirectory (e.g., images)
+        if any(p.is_dir() for p in directory.iterdir()):
+            return True
+        return False
+
+    def extract_archives(directory: Path):
+        # Recursively extract all zip, tar, tar.gz files in directory and subdirectories
+        zip_files = list(directory.rglob("*.zip"))
+        tar_files = list(directory.rglob("*.tar")) + list(directory.rglob("*.tar.gz"))
+        for path in tqdm.tqdm(zip_files, desc="Extracting ZIP files"):
+            try:
+                with zipfile.ZipFile(path, "r") as zip_ref:
+                    zip_ref.extractall(path.parent)
+                print(f"Extracted {path}")
+            except Exception as e:
+                print(f"Failed to extract {path}: {e}")
+        for path in tqdm.tqdm(tar_files, desc="Extracting TAR files"):
+            try:
+                with tarfile.open(path, "r:*") as tar_ref:
+                    tar_ref.extractall(path.parent)
+                print(f"Extracted {path}")
+            except Exception as e:
+                print(f"Failed to extract {path}: {e}")
+
     for split in splits:
         if dataset_name == "cifar100":
             if split not in _VALID_SPLITS:
                 raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
             train_flag = split == "train"
             CIFAR100(root=str(root), train=train_flag, download=True)
+            downloaded[split] = root
+            continue
+
+        if snapshot_download:
+            target_dir = root / f"{dataset_name.replace('/', '_')}"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            huggingface_hub.snapshot_download(
+                repo_id=dataset_name,
+                repo_type="dataset",
+                revision="main",
+                local_dir=str(target_dir),
+            )
+            # Always try to extract archives after download
+            extract_archives(target_dir)
+            downloaded[split] = target_dir
         else:
             datasets.load_dataset(dataset_name, split=split, cache_dir=str(root))
-
-        downloaded[split] = root
+            downloaded[split] = root
     return downloaded
 
 def _parse_args() -> argparse.Namespace:
@@ -81,6 +128,11 @@ def _parse_args() -> argparse.Namespace:
         "(default: cifar100, class dataset: tsbpp/fall2025_deeplearning)",
     )
     parser.add_argument(
+        "--snapshot-download",
+        action="store_true",
+        help="Use snapshot_download from huggingface datasets.",
+    )
+    parser.add_argument(
         "--splits",
         nargs="+",
         default=("train", "test"),
@@ -94,7 +146,10 @@ def main() -> None:
     """Command-line entrypoint used via ``python -m wejepa.data.download``."""
 
     args = _parse_args()
-    downloads = download(args.dataset_root, args.dataset_name, splits=args.splits)
+    downloads = download(args.dataset_root, 
+                         args.dataset_name, 
+                         snapshot_download=args.snapshot_download, 
+                         splits=args.splits)
     for split, root in downloads.items():
         print(f"Split '{split}' available under {root}")
 

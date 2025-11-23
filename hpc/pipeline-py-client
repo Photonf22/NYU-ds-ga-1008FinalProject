@@ -134,11 +134,11 @@ def install_dependencies(pip_command: str, dry_run: bool) -> None:
         run_command(command, dry_run=dry_run if dry_run else False) if dry_run else subprocess.run(command, cwd=str(project_root), check=True)
 
 
-def build_download_command(dataset: str, dataset_root: Path, splits: Iterable[str]) -> List[str]:
+def build_download_command(dataset: str, dataset_root: Path, splits: Iterable[str], snapshot_download: bool) -> List[str]:
     """Construct the dataset download command for a single dataset."""
 
     split_arg = ",".join(splits)
-    return [
+    command = [
         "python",
         "-m",
         "wejepa.datasets.download",
@@ -149,14 +149,17 @@ def build_download_command(dataset: str, dataset_root: Path, splits: Iterable[st
         "--splits",
         split_arg,
     ]
+    if snapshot_download:
+        command.insert(7, "--snapshot-download")
+        
+    return command
 
-
-def download_datasets(datasets: Iterable[str], dataset_root: Path, splits: Iterable[str], dry_run: bool) -> None:
+def download_datasets(datasets: Iterable[str], dataset_root: Path, splits: Iterable[str], snapshot_download: bool, dry_run: bool) -> None:
     """Download one or more datasets sequentially."""
 
     ensure_exists(dataset_root, "Dataset root")
     for dataset in datasets:
-        command = build_download_command(dataset, dataset_root, splits)
+        command = build_download_command(dataset, dataset_root, splits, snapshot_download=snapshot_download)
         run_command(command, dry_run=dry_run)
 
 
@@ -244,7 +247,7 @@ def handle_install(args: argparse.Namespace) -> None:
 def handle_download(args: argparse.Namespace) -> None:
     # Default to 'data' directory if not specified
     dataset_root = Path(args.dataset_root) if hasattr(args, 'dataset_root') and args.dataset_root else Path('data')
-    download_datasets(args.datasets, dataset_root, args.splits, dry_run=args.dry_run)
+    download_datasets(args.datasets, dataset_root, args.splits, snapshot_download=args.snapshot_download, dry_run=args.dry_run)
 
 
 def handle_pretrain(args: argparse.Namespace) -> None:
@@ -349,6 +352,11 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         default=["train"],
         help="Dataset splits to download (e.g., train test train[:10]).",
+    )
+    download_parser.add_argument(
+        "--snapshot-download",
+        action="store_true",
+        help="Use snapshot_download from huggingface datasets.",
     )
     download_parser.set_defaults(func=handle_download)
 
@@ -568,6 +576,7 @@ def dialog_download(ui: DialogUI) -> None:
             return
         splits_raw = ui.inputbox("Splits (comma separated)", "train")
         splits = [split.strip() for split in splits_raw.split(",") if split.strip()]
+        snapshot_download = ui.yesno("Use snapshot_download from huggingface datasets?", default_no=False)
         dry_run = prompt_dry_run(ui, config_key="last_download_dry_run")
     except DialogCancelled:
         return
@@ -575,11 +584,12 @@ def dialog_download(ui: DialogUI) -> None:
     config["last_dataset_root"] = str(dataset_root)
     config["last_datasets"] = datasets
     config["last_splits"] = splits
+    config["last_snapshot_download"] = snapshot_download
     save_config(config)
 
     try:
         for dataset in datasets:
-            command = build_download_command(dataset, dataset_root, splits)
+            command = build_download_command(dataset, dataset_root, splits, snapshot_download=snapshot_download)
             run_command(command, dry_run=dry_run, ui=ui)
     except Exception as exc:  # pragma: no cover - surfaced to the user
         ui.msgbox(f"Download failed: {exc}")
