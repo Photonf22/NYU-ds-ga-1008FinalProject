@@ -109,3 +109,6 @@ remote shell.
   (job name, resources, overlay paths, and command body).
 - If `sbatch` is not on your PATH, submission will fail with a clear error but
   the script will still be generated.
+
+For a deeper dive into HPC and configuration knobs, see
+[`docs/hpc_guide.md`](../docs/hpc_guide.md).
