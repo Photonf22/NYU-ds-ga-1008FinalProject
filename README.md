@@ -60,6 +60,9 @@ launch_pretraining(cfg)
 Checkpoints (student, teacher and predictor weights) are stored in
 `cfg.hardware.output_dir` after every epoch.
 
+For a deeper dive into the architecture and configuration knobs, see
+[`docs/architecture.md`](docs/architecture.md).
+
 ## Fine-tuning / linear probing
 
 Fine-tuning utilities live next to the pretraining code.  The module exposes a
