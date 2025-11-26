@@ -368,12 +368,18 @@ def create_cub_inference_dataloader(
     return loader
 
 
+# Backwards compatible aliases for exported helpers
+create_cub_pretraining_dataloader = create_pretraining_dataloader
+create_cub_classification_dataloaders = create_classification_dataloaders
+
 __all__ = [
     "CUB200Dataset",
     "CubSplit",
     "build_cub_train_transform",
     "build_cub_eval_transform",
+    "create_pretraining_dataloader",
     "create_cub_pretraining_dataloader",
+    "create_classification_dataloaders",
     "create_cub_classification_dataloaders",
     "create_cub_inference_dataloader",
 ]

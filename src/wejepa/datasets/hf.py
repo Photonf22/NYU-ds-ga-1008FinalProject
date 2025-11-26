@@ -1,4 +1,5 @@
 """HuggingFace dataset helpers for pretraining."""
+import importlib
 import random
 import numpy as np
 from PIL import Image
@@ -6,7 +7,6 @@ from scipy import io
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
-from datasets import load_dataset
 import torchvision.transforms as T
 import torch.distributed as dist
 
@@ -23,6 +23,8 @@ class IJEPAHFDataset(Dataset):
     ):
         self.cfg = cfg
         self.transform = transform or build_train_transform(cfg)
+        datasets = importlib.import_module("datasets")
+        load_dataset = datasets.load_dataset
         self.dataset = load_dataset(
             cfg.data.dataset_name,
             split=split,

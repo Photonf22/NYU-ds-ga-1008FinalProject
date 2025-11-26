@@ -16,4 +16,4 @@ def create_pretraining_dataloader(cfg: IJepaConfig, rank: int = 0, world_size: i
         from wejepa.datasets.hf import create_pretraining_dataloader as hf_loader
         return hf_loader(cfg, rank=rank, world_size=world_size, split="train")
 
-__all__: Tuple[str, ...] = ("careate_pretraining_dataloader",)
+__all__: Tuple[str, ...] = ("create_pretraining_dataloader",)
