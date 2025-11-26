@@ -24,12 +24,26 @@ class IJEPAHFDataset(Dataset):
         self.cfg = cfg
         self.transform = transform or build_train_transform(cfg)
         datasets = importlib.import_module("datasets")
-        load_dataset = datasets.load_dataset
-        self.dataset = load_dataset(
-            cfg.data.dataset_name,
-            split=split,
-            cache_dir=cfg.data.dataset_root,
-        )
+        if cfg.data.dataset_name.lower() == "imagefolder":
+            dataset_dir = getattr(cfg.data, "dataset_dir", None)
+            if dataset_dir is None:
+                raise ValueError("For 'imagefolder' dataset_name, 'dataset_dir' must be specified in the config.")
+
+            dataset_dir = cfg.data.dataset_root + "/" + dataset_dir
+            print(f"Loading imagefolder dataset from directory: {dataset_dir}")
+            self.dataset = datasets.load_dataset(
+                "imagefolder",
+                data_dir=dataset_dir,
+                split=split,
+                cache_dir=cfg.data.dataset_root,
+            )
+        else:
+            load_dataset = datasets.load_dataset
+            self.dataset = load_dataset(
+                cfg.data.dataset_name,
+                split=split,
+                cache_dir=cfg.data.dataset_root,
+            )
 
     def __len__(self):
         return len(self.dataset)

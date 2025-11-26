@@ -19,6 +19,7 @@ class DataConfig:
 
     dataset_root: str = field(default_factory=_default_dataset_root)
     dataset_name: str = "cifar100"
+    dataset_dir: Optional[str] = None
     image_size: int = 32
     train_batch_size: int = 256
     eval_batch_size: int = 512
@@ -142,7 +143,8 @@ def hf224_config() -> IJepaConfig:
     """Configuration tailored for 224x224 Hugging Face image datasets."""
 
     cfg = default_config()
-    cfg.data.dataset_name = "tsbpp/fall2025_deeplearning"
+    cfg.data.dataset_name = "imagefolder"
+    cfg.data.dataset_dir = "tsbpp_fall2025_deeplearning"
     cfg.data.image_size = 224
     cfg.model.img_size = 224
     cfg.model.patch_size = 16

@@ -21,8 +21,10 @@ from .hf import (
     create_pretraining_dataloader as create_hf_pretraining_dataloader,
 )
 from .loader import create_pretraining_dataloader
+
 from .feature_extractor import FeatureExtractor
 from .image_dataset import ImageDataset
+from .prepare_images import prepare_imagefolder, load_class_map
 
 __all__ = [
     "CUB200Dataset",
@@ -41,4 +43,6 @@ __all__ = [
     "create_pretraining_dataloader",
     "FeatureExtractor",
     "ImageDataset",
+    "prepare_imagefolder",
+    "load_class_map",
 ]
