@@ -1,53 +1,107 @@
-"""Hugging Face dataset helpers for pretraining."""
+"""HuggingFace dataset helpers for pretraining."""
+import importlib
+import random
+import numpy as np
+from PIL import Image
+from scipy import io
+import torch
+from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.distributed import DistributedSampler
+import torchvision.transforms as T
+import torch.distributed as dist
 
-from torch.utils.data import Dataset
-from datasets import load_dataset
+from ..config import IJepaConfig
 
-class HFDataset(Dataset):
-    def __init__(self, cfg, split="train", transform=None):
+class IJEPAHFDataset(Dataset):
+    """Return unlabeled images from HuggingFace datasets."""
+
+    def __init__(
+        self,
+        cfg: IJepaConfig,
+        split: str = "train",
+        transform: T.Compose = None,
+    ):
         self.cfg = cfg
-        self.transform = transform
+        self.transform = transform or build_train_transform(cfg)
+        datasets = importlib.import_module("datasets")
+        load_dataset = datasets.load_dataset
         self.dataset = load_dataset(
-            cfg.data.dataset_name,  # e.g., "tsbpp/fall2025_deeplearning"
+            cfg.data.dataset_name,
             split=split,
-            data_dir=cfg.data.dataset_root
+            cache_dir=cfg.data.dataset_root,
         )
 
     def __len__(self):
         return len(self.dataset)
 
-    def __getitem__(self, idx):
-        img = self.dataset[idx]["image"]  # column name may vary
-        if self.transform:
-            img = self.transform(img)
+    def __getitem__(self, index):
+        sample = self.dataset[index]
+        img = sample.get("image", None)
+        if img is None:
+            raise ValueError(f"No 'image' field in sample: {sample.keys()}")
+        if isinstance(img, dict):
+            print("Image dict keys:", img.keys())
+            if "bytes" in img:
+                img = Image.open(io.BytesIO(img["bytes"]))
+            else:
+                raise TypeError(f"Unknown image dict format: {img}")
+        img = self.transform(img)
         return img
 
-def build_train_transform(cfg):
-    from torchvision import transforms
-    return transforms.Compose([
-        transforms.Resize((cfg.data.image_size, cfg.data.image_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(cfg.data.normalization_mean, cfg.data.normalization_std),
+def build_train_transform(cfg: IJepaConfig) -> T.Compose:
+    dcfg = cfg.data
+    transforms = [T.Resize(dcfg.image_size)]
+    transforms.extend([
+        T.ToTensor(),
+        T.Normalize(dcfg.normalization_mean, dcfg.normalization_std),
     ])
+    return T.Compose(transforms)
 
-def build_eval_transform(cfg):
-    from torchvision import transforms
-    return transforms.Compose([
-        transforms.Resize((cfg.data.image_size, cfg.data.image_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(cfg.data.normalization_mean, cfg.data.normalization_std),
-    ])
+def _worker_init_fn(worker_id: int) -> None:
+    seed = torch.initial_seed() % 2**32
+    np.random.seed(seed)
+    random.seed(seed)
 
-def create_pretraining_dataloader(cfg, split="train"):
-    from torch.utils.data import DataLoader
-    transform = build_train_transform(cfg) if split == "train" else build_eval_transform(cfg)
-    dataset = HFDataset(cfg, split=split, transform=transform)
-    return DataLoader(
-        dataset,
-        batch_size=cfg.data.train_batch_size if split == "train" else cfg.data.eval_batch_size,
-        shuffle=(split == "train"),
+def create_pretraining_dataloader(
+    cfg: IJepaConfig,
+    rank: int = 0,
+    world_size: int = 1,
+    split: str = "train",
+):
+    dataset = IJEPAHFDataset(cfg, split=split)
+    if world_size > 1 and dist.is_available() and dist.is_initialized():
+        dist.barrier()
+    sampler = None
+    if world_size > 1:
+        sampler = DistributedSampler(
+            dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True,
+            drop_last=True,
+        )
+    batch_size = cfg.data.train_batch_size
+    if world_size > 1:
+        batch_size = max(1, batch_size // world_size)
+    loader_kwargs = dict(
+        dataset=dataset,
+        batch_size=batch_size,
+        shuffle=sampler is None,
+        sampler=sampler,
         num_workers=cfg.data.num_workers,
         pin_memory=cfg.data.pin_memory,
-        persistent_workers=cfg.data.persistent_workers,
-        prefetch_factor=cfg.data.prefetch_factor,
+        drop_last=True,
+        worker_init_fn=_worker_init_fn,
+        persistent_workers=cfg.data.persistent_workers and cfg.data.num_workers > 0,
     )
+    if cfg.data.num_workers > 0:
+        loader_kwargs["prefetch_factor"] = cfg.data.prefetch_factor
+
+    loader = DataLoader(**loader_kwargs)
+    return loader, sampler
+
+__all__ = [
+    "IJEPAHFDataset",
+    "build_train_transform",
+    "create_pretraining_dataloader",
+]
