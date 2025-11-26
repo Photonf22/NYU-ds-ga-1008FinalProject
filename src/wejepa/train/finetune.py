@@ -1,10 +1,10 @@
-"""Utility helpers for fine-tuning a pretrained WE-JEPA encoder."""
+"""Fine-tuning utilities for WE-JEPA backbones."""
+
 from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 from torch import nn
@@ -30,6 +30,14 @@ class FinetuneConfig:
     checkpoint_path: Optional[str] = None
 
 
+@dataclass
+class FinetuneReport:
+    """Accuracy trace comparing pretrained and scratch linear probes."""
+
+    pretrained_accuracy: List[float]
+    scratch_accuracy: List[float]
+
+
 class LinearProbe(nn.Module):
     """Average pooled linear probe on top of the JEPA student encoder."""
 
@@ -50,7 +58,14 @@ class LinearProbe(nn.Module):
 
 def _cifar_dataset(cfg: IJepaConfig, train: bool) -> torchvision.datasets.CIFAR100:
     transform = build_train_transform(cfg) if train else build_eval_transform(cfg)
-    dataset = torchvision.datasets.CIFAR100(
+    if cfg.data.use_fake_data:
+        return torchvision.datasets.FakeData(
+            size=cfg.data.fake_data_size,
+            image_size=(3, cfg.data.image_size, cfg.data.image_size),
+            num_classes=max(cfg.data.fake_data_size, cfg.data.eval_batch_size),
+            transform=transform,
+        )
+    return torchvision.datasets.CIFAR100(
         root=cfg.data.dataset_root,
         train=train,
         transform=transform,
@@ -65,7 +80,7 @@ def create_finetune_dataloader(
     dataset = _cifar_dataset(cfg, train=train)
     kwargs = dict(
         dataset=dataset,
-        batch_size=batch_size or cfg.data.train_batch_size,
+        batch_size=batch_size or (cfg.data.train_batch_size if train else cfg.data.eval_batch_size),
         shuffle=train,
         num_workers=cfg.data.num_workers,
         pin_memory=cfg.data.pin_memory,
@@ -91,6 +106,8 @@ def load_backbone_from_checkpoint(checkpoint_path: str, cfg: Optional[IJepaConfi
         post_emb_norm=cfg.model.post_emb_norm,
         M=cfg.mask.num_target_blocks,
         layer_dropout=cfg.model.layer_dropout,
+        backbone=cfg.model.classification_backbone,
+        pretrained=cfg.model.classification_pretrained,
     )
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     student_state = checkpoint.get("student") or checkpoint
@@ -145,7 +162,32 @@ def _evaluate(model: LinearProbe, loader: DataLoader, device: torch.device) -> f
     return total_correct / max(1, total)
 
 
-def train_linear_probe(ft_cfg: Optional[FinetuneConfig] = None) -> None:
+def _train_linear_probe_once(
+    backbone: IJEPA_base,
+    cfg: FinetuneConfig,
+    device: torch.device,
+    train_loader: DataLoader,
+    eval_loader: DataLoader,
+) -> List[float]:
+    model = LinearProbe(backbone, cfg.num_classes).to(device)
+    optimizer = torch.optim.Adam(
+        model.head.parameters(),
+        lr=cfg.learning_rate,
+        weight_decay=cfg.weight_decay,
+    )
+    accuracies: List[float] = []
+    for epoch in range(cfg.epochs):
+        loss, acc = _train_one_epoch(model, train_loader, optimizer, device)
+        val_acc = _evaluate(model, eval_loader, device)
+        accuracies.append(val_acc)
+        print(
+            f"[Linear probe] Epoch {epoch + 1}/{cfg.epochs} "
+            f"| loss={loss:.4f} | train_acc={acc:.3f} | val_acc={val_acc:.3f}"
+        )
+    return accuracies
+
+
+def train_linear_probe(ft_cfg: Optional[FinetuneConfig] = None) -> LinearProbe:
     ft_cfg = ft_cfg or FinetuneConfig()
     cfg = ft_cfg.ijepa
     if ft_cfg.checkpoint_path is None:
@@ -170,6 +212,44 @@ def train_linear_probe(ft_cfg: Optional[FinetuneConfig] = None) -> None:
             f"[Linear probe] Epoch {epoch + 1}/{ft_cfg.epochs} "
             f"| loss={loss:.4f} | train_acc={acc:.3f} | val_acc={val_acc:.3f}"
         )
+    return model
+
+
+def compare_pretrained_vs_scratch(ft_cfg: FinetuneConfig) -> FinetuneReport:
+    """Train probes on a pretrained backbone vs. a fresh one for quick validation."""
+
+    cfg = ft_cfg.ijepa
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    train_loader = create_finetune_dataloader(cfg, train=True, batch_size=ft_cfg.batch_size)
+    eval_loader = create_finetune_dataloader(cfg, train=False, batch_size=ft_cfg.batch_size)
+
+    # Pretrained probe
+    pretrained_backbone = load_backbone_from_checkpoint(ft_cfg.checkpoint_path, cfg)
+    pretrained_backbone.to(device)
+    pretrained_acc = _train_linear_probe_once(
+        pretrained_backbone, ft_cfg, device, train_loader, eval_loader
+    )
+
+    # Scratch probe
+    scratch_backbone = IJEPA_base(
+        img_size=cfg.model.img_size,
+        patch_size=cfg.model.patch_size,
+        in_chans=cfg.model.in_chans,
+        embed_dim=cfg.model.embed_dim,
+        enc_depth=cfg.model.enc_depth,
+        pred_depth=cfg.model.pred_depth,
+        num_heads=cfg.model.num_heads,
+        post_emb_norm=cfg.model.post_emb_norm,
+        M=cfg.mask.num_target_blocks,
+        layer_dropout=cfg.model.layer_dropout,
+        backbone=cfg.model.classification_backbone,
+        pretrained=cfg.model.classification_pretrained,
+    ).to(device)
+    scratch_acc = _train_linear_probe_once(
+        scratch_backbone, ft_cfg, device, train_loader, eval_loader
+    )
+
+    return FinetuneReport(pretrained_accuracy=pretrained_acc, scratch_accuracy=scratch_acc)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -198,8 +278,10 @@ def main() -> None:
 
 __all__ = [
     "FinetuneConfig",
+    "FinetuneReport",
     "LinearProbe",
     "create_finetune_dataloader",
+    "compare_pretrained_vs_scratch",
     "load_backbone_from_checkpoint",
     "train_linear_probe",
 ]

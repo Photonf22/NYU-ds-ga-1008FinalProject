@@ -1,13 +1,16 @@
-"""Simplified I-JEPA style encoder used throughout the wejepa package."""
+"""JEPA model implementation"""
 from __future__ import annotations
 
 import copy
 import math
-from typing import List, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
+
+from wejepa.backbones import build_backbone, choose_num_heads, get_backbone_spec
 
 
 class PatchEmbed(nn.Module):
@@ -49,7 +52,9 @@ class TransformerBlock(nn.Module):
     ) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(embed_dim)
-        self.attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True, dropout=dropout)
+        self.attn = nn.MultiheadAttention(
+            embed_dim, num_heads, batch_first=True, dropout=dropout
+        )
         self.norm2 = nn.LayerNorm(embed_dim)
         hidden_dim = int(embed_dim * mlp_ratio)
         self.mlp = nn.Sequential(
@@ -59,11 +64,25 @@ class TransformerBlock(nn.Module):
             nn.Linear(hidden_dim, embed_dim),
             nn.Dropout(dropout),
         )
+        self._attention_recorder: Optional[Callable[[torch.Tensor], None]] = None
+
+    def set_attention_recorder(self, recorder: Optional[Callable[[torch.Tensor], None]]) -> None:
+        """Optionally capture attention weights during the forward pass."""
+
+        self._attention_recorder = recorder
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
         x = self.norm1(x)
-        attn_out, _ = self.attn(x, x, x, need_weights=False)
+        attn_out, attn_weights = self.attn(
+            x,
+            x,
+            x,
+            need_weights=self._attention_recorder is not None,
+            average_attn_weights=False,
+        )
+        if self._attention_recorder is not None and attn_weights is not None:
+            self._attention_recorder(attn_weights.detach())
         x = residual + attn_out
         residual = x
         x = self.norm2(x)
@@ -78,6 +97,10 @@ class TransformerEncoder(nn.Module):
             [TransformerBlock(embed_dim, num_heads) for _ in range(depth)]
         )
         self.norm = nn.LayerNorm(embed_dim)
+
+    def set_attention_recorder(self, recorder: Optional[Callable[[torch.Tensor], None]]) -> None:
+        for layer in self.layers:
+            layer.set_attention_recorder(recorder)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:
@@ -105,8 +128,6 @@ class Predictor(nn.Module):
 
 
 class IJEPA_base(nn.Module):
-    """Simplified implementation of the Image-based JEPA architecture."""
-
     def __init__(
         self,
         img_size: int,
@@ -120,17 +141,44 @@ class IJEPA_base(nn.Module):
         M: int = 4,
         mode: str = "train",
         layer_dropout: float = 0.0,
+        backbone: str = None,
+        pretrained: bool = False,
     ) -> None:
         super().__init__()
         del layer_dropout  # kept for backwards compatibility
         self.M = M
         self.mode = mode
-        self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
-        self.patch_dim = self.patch_embed.patch_shape
-        self.num_tokens = self.patch_dim[0] * self.patch_dim[1]
+        self.backbone = None
+        self.patch_embed = None
+
+        if backbone is not None:
+            spec = get_backbone_spec(backbone)
+            self.backbone, self.feature_dim = build_backbone(
+                backbone,
+                pretrained=pretrained,
+                num_classes=None,
+            )
+            embed_dim = self.backbone.hidden_dim
+            img_size = self.backbone.image_size
+            patch_size = self.backbone.patch_size
+            num_heads = choose_num_heads(embed_dim, spec.default_num_heads, num_heads)
+
+            # so that everything downstream sees compatible shapes
+            self.patch_dim = getattr(self.backbone, "patch_dim", None) or (
+                img_size // patch_size,
+                img_size // patch_size,
+            )
+            self.num_tokens = self.patch_dim[0] * self.patch_dim[1]
+            self.patch_embed = None
+        else:
+            self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
+            self.patch_dim = self.patch_embed.patch_shape
+            self.num_tokens = self.patch_dim[0] * self.patch_dim[1]
+
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_tokens, embed_dim))
         self.mask_token = nn.Parameter(torch.randn(1, 1, embed_dim))
         nn.init.trunc_normal_(self.mask_token, std=0.02)
+
         self.post_emb_norm = nn.LayerNorm(embed_dim) if post_emb_norm else nn.Identity()
         self.norm = nn.LayerNorm(embed_dim)
         self.student_encoder = TransformerEncoder(embed_dim, enc_depth, num_heads)
@@ -138,9 +186,49 @@ class IJEPA_base(nn.Module):
         for param in self.teacher_encoder.parameters():
             param.requires_grad = False
         self.predictor = Predictor(embed_dim, num_heads, pred_depth)
+        self._attention_maps: List[torch.Tensor] = []
+
+    def _maybe_resize_positional_embedding(self, tokens: torch.Tensor) -> None:
+        """Resize positional embeddings when backbone token grids differ."""
+
+        seq_len = tokens.shape[1]
+        if seq_len == self.pos_embedding.shape[1]:
+            return
+
+        old_tokens = self.pos_embedding.shape[1]
+        old_h = int(math.sqrt(old_tokens)) or 1
+        old_w = old_tokens // old_h
+
+        new_h = int(math.sqrt(seq_len)) or 1
+        new_w = max(1, seq_len // new_h)
+        if new_h * new_w != seq_len:
+            new_w = math.ceil(seq_len / new_h)
+            new_h = math.ceil(seq_len / new_w)
+
+        pos = self.pos_embedding
+        pos = pos.reshape(1, old_h, old_w, -1).permute(0, 3, 1, 2)
+        pos = F.interpolate(pos, size=(new_h, new_w), mode="bilinear", align_corners=False)
+        pos = pos.permute(0, 2, 3, 1).reshape(1, new_h * new_w, -1)
+
+        # replace parameter so gradients flow to resized tensor
+        self.pos_embedding = nn.Parameter(pos)
+        self.patch_dim = (new_h, new_w)
+        self.num_tokens = new_h * new_w
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
+
+    def enable_attention_recording(self, enabled: bool = True) -> None:
+        """Toggle attention recording on the student encoder."""
+
+        self._attention_maps = [] if enabled else []
+        recorder = self._attention_maps.append if enabled else None
+        self.student_encoder.set_attention_recorder(recorder)
+
+    def get_recorded_attentions(self) -> List[torch.Tensor]:
+        """Return any attention maps captured during the last forward pass."""
+
+        return list(self._attention_maps)
 
     @torch.no_grad()
     def momentum_update(self, momentum: float) -> None:
@@ -228,17 +316,43 @@ class IJEPA_base(nn.Module):
         context_aspect_ratio: float = 1.0,
         context_scale: float = 0.9,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        tokens = self.patch_embed(x)
-        tokens = tokens + self.pos_embedding
+        #print("Forward pass in mode:", self.mode)
+        # get tokens from either backbone or PatchEmbed
+        if self.backbone is not None:
+            tokens = self.backbone(x)                     # B x N x D
+        elif self.patch_embed is not None:
+            tokens = self.patch_embed(x)                  # B x N x D
+        else:
+            tokens = x
+
+        #print("Tokens shape:", tokens.shape)
+        # add positional embeddings and norm
+        self._maybe_resize_positional_embedding(tokens)
+        tokens = tokens + self.pos_embedding              # B x N x D
         tokens = self.post_emb_norm(tokens)
+
         if self.mode == "test":
-            return self.student_encoder(tokens)
+            encoded = self.student_encoder(tokens)
+            encoded = self.norm(encoded)
+            return encoded
+
+        # use the *same* block selection for both modes
+        #print("Selecting target and context blocks...")
         target_blocks, target_patches, all_patches = self.get_target_block(
-            self.teacher_encoder, tokens, self.patch_dim, target_aspect_ratio, target_scale, self.M
+            self.teacher_encoder,
+            tokens,
+            self.patch_dim,
+            target_aspect_ratio,
+            target_scale,
+            self.M,
         )
         context_block = self.get_context_block(
-            tokens, self.patch_dim, context_aspect_ratio, context_scale, all_patches
-        )
+            tokens,
+            self.patch_dim,
+            context_aspect_ratio,
+            context_scale,
+            all_patches,
+        ) 
         context_encoding = self.student_encoder(context_block)
         context_encoding = self.norm(context_encoding)
         m, bsz, n_tok, embed_dim = target_blocks.shape
@@ -251,5 +365,14 @@ class IJEPA_base(nn.Module):
             prediction_blocks[i] = self.predictor(context_encoding, target_masks)
         return prediction_blocks, target_blocks
 
+    # number of parameters (student + predictor)
+    def count_parameters(self) -> int:
+        student_params = sum(p.numel() for p in self.student_encoder.parameters() if p.requires_grad)
+        predictor_params = sum(p.numel() for p in self.predictor.parameters() if p.requires_grad)
+        return student_params + predictor_params
+
+    # number of trainable parameters including teacher
+    def count_trainable_parameters(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 __all__ = ["IJEPA_base", "PatchEmbed"]

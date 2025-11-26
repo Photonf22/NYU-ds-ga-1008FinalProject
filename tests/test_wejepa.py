@@ -1,5 +1,9 @@
-"""Smoke tests for the wejepa package."""
-from wejepa import IJEPADataset, IJepaConfig, create_pretraining_dataloader, default_config
+import pytest
+
+pytest.importorskip("torch")
+
+from wejepa import IJepaConfig, default_config
+from wejepa.datasets.cifar import IJEPACIFARDataset, create_pretraining_dataloader
 
 
 def _fake_config() -> IJepaConfig:
@@ -14,7 +18,7 @@ def _fake_config() -> IJepaConfig:
 def test_dataset_returns_tensor(tmp_path):
     cfg = _fake_config()
     cfg.data.dataset_root = str(tmp_path)
-    dataset = IJEPADataset(cfg, train=True)
+    dataset = IJEPACIFARDataset(cfg, train=True)
     sample = dataset[0]
     assert sample.shape[-2:] == (cfg.data.image_size, cfg.data.image_size)
 
