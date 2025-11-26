@@ -1,7 +1,7 @@
 {
   "data": {
     "dataset_root": "./data",
-    "dataset_name": "tsbpp___fall2025_deeplearning",
+    "dataset_name": "tsbpp_fall2025_deeplearning",
     "image_size": 224,
     "train_batch_size": 128,
     "eval_batch_size": 512,

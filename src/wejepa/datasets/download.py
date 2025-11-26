@@ -115,21 +115,22 @@ def download(
             
             downloaded[split] = root
 
-        if snapshot_download:
-            target_dir = root / f"{dataset_name.replace('/', '_')}"
-            target_dir.mkdir(parents=True, exist_ok=True)
-            huggingface_hub.snapshot_download(
-                repo_id=dataset_name,
-                repo_type="dataset",
-                revision="main",
-                local_dir=str(target_dir),
-            )
-            # Always try to extract archives after download
-            extract_archives(target_dir)
-            downloaded[split] = target_dir
         else:
             datasets.load_dataset(dataset_name, split=split, cache_dir=str(root))
-            downloaded[split] = root
+            if snapshot_download:
+                target_dir = root / f"{dataset_name.replace('/', '_')}"
+                target_dir.mkdir(parents=True, exist_ok=True)
+                huggingface_hub.snapshot_download(
+                    repo_id=dataset_name,
+                    repo_type="dataset",
+                    revision="main",
+                    local_dir=str(target_dir),
+                )
+                # Always try to extract archives after download
+                extract_archives(target_dir)
+                downloaded[split] = target_dir
+            else:
+                downloaded[split] = root
 
     return downloaded
 
