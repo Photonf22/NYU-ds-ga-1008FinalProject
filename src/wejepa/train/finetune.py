@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -301,12 +303,13 @@ def compare_pretrained_vs_scratch(ft_cfg: FinetuneConfig) -> FinetuneReport:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fine-tune a pretrained WE-JEPA encoder")
-    parser.add_argument("--checkpoint", type=str, required=True, help="Path to a saved checkpoint")
-    parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight-decay", type=float, default=0.0)
-    parser.add_argument("--num-classes", type=int, default=100)
+    parser.add_argument("--config", type=str, default=None, help="Path to a JSON config file for fine-tuning")
+    parser.add_argument("--checkpoint", type=str, default=None, help="Path to a saved checkpoint (overrides config)")
+    parser.add_argument("--epochs", type=int, default=None, help="Number of epochs (overrides config)")
+    parser.add_argument("--batch-size", type=int, default=None, help="Batch size (overrides config)")
+    parser.add_argument("--lr", type=float, default=None, help="Learning rate (overrides config)")
+    parser.add_argument("--weight-decay", type=float, default=None, help="Weight decay (overrides config)")
+    parser.add_argument("--num-classes", type=int, default=None, help="Number of classes (overrides config)")
     parser.add_argument(
         "--debug",
         action="store_true",
@@ -317,16 +320,37 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    ft_cfg = FinetuneConfig(
-        epochs=args.epochs,
-        batch_size=args.batch_size,
-        learning_rate=args.lr,
-        weight_decay=args.weight_decay,
-        num_classes=args.num_classes,
-        checkpoint_path=args.checkpoint,
-        debug=args.debug,
-    )
+    # Load config from file if provided
+    config_data = {}
+    if args.config is not None:
+        if not os.path.isfile(args.config):
+            raise FileNotFoundError(f"Config file not found: {args.config}")
+        with open(args.config, "r") as f:
+            config_data = json.load(f)
+    # Build FinetuneConfig from config file, then override with CLI args if provided
+    ft_cfg = FinetuneConfig()
+    # Update from config file
+    for k, v in config_data.items():
+        if hasattr(ft_cfg, k):
+            setattr(ft_cfg, k, v)
+    # CLI args override config file
+    if args.epochs is not None:
+        ft_cfg.epochs = args.epochs
+    if args.batch_size is not None:
+        ft_cfg.batch_size = args.batch_size
+    if args.lr is not None:
+        ft_cfg.learning_rate = args.lr
+    if args.weight_decay is not None:
+        ft_cfg.weight_decay = args.weight_decay
+    if args.num_classes is not None:
+        ft_cfg.num_classes = args.num_classes
+    if args.checkpoint is not None:
+        ft_cfg.checkpoint_path = args.checkpoint
     if args.debug:
+        ft_cfg.debug = True
+    if ft_cfg.checkpoint_path is None:
+        raise ValueError("A pretrained checkpoint path must be provided via --checkpoint or config file.")
+    if ft_cfg.debug:
         print(f"[DEBUG] Fine-tune config: {ft_cfg}")
     train_linear_probe(ft_cfg)
 
