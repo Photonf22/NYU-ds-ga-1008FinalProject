@@ -28,6 +28,7 @@ class FinetuneConfig:
     num_classes: int = 100
     num_workers: int = 4
     checkpoint_path: Optional[str] = None
+    debug: bool = False
 
 
 @dataclass
@@ -56,14 +57,22 @@ class LinearProbe(nn.Module):
         return self.head(pooled)
 
 
-def _cifar_dataset(cfg: IJepaConfig, train: bool) -> torchvision.datasets.CIFAR100:
+def _cifar_dataset(cfg: IJepaConfig, train: bool, debug: bool = False) -> torchvision.datasets.CIFAR100:
     transform = build_train_transform(cfg) if train else build_eval_transform(cfg)
     if cfg.data.use_fake_data:
+        if debug:
+            print(
+                f"[DEBUG] Using FakeData with size={cfg.data.fake_data_size} for {'train' if train else 'eval'}"
+            )
         return torchvision.datasets.FakeData(
             size=cfg.data.fake_data_size,
             image_size=(3, cfg.data.image_size, cfg.data.image_size),
             num_classes=max(cfg.data.fake_data_size, cfg.data.eval_batch_size),
             transform=transform,
+        )
+    if debug:
+        print(
+            f"[DEBUG] Loading CIFAR100 train={train} root={cfg.data.dataset_root} transform={transform}"
         )
     return torchvision.datasets.CIFAR100(
         root=cfg.data.dataset_root,
@@ -75,9 +84,9 @@ def _cifar_dataset(cfg: IJepaConfig, train: bool) -> torchvision.datasets.CIFAR1
 
 
 def create_finetune_dataloader(
-    cfg: IJepaConfig, train: bool, batch_size: Optional[int] = None
+    cfg: IJepaConfig, train: bool, batch_size: Optional[int] = None, debug: bool = False
 ) -> DataLoader:
-    dataset = _cifar_dataset(cfg, train=train)
+    dataset = _cifar_dataset(cfg, train=train, debug=debug)
     kwargs = dict(
         dataset=dataset,
         batch_size=batch_size or (cfg.data.train_batch_size if train else cfg.data.eval_batch_size),
@@ -89,11 +98,18 @@ def create_finetune_dataloader(
     )
     if cfg.data.num_workers > 0:
         kwargs["prefetch_factor"] = cfg.data.prefetch_factor
+    if debug:
+        print(
+            f"[DEBUG] Created {'train' if train else 'eval'} dataloader with batch_size={kwargs['batch_size']} "
+            f"workers={cfg.data.num_workers} shuffle={train} dataset_len={len(dataset)}"
+        )
     loader = DataLoader(**kwargs)
     return loader
 
 
-def load_backbone_from_checkpoint(checkpoint_path: str, cfg: Optional[IJepaConfig] = None) -> IJEPA_base:
+def load_backbone_from_checkpoint(
+    checkpoint_path: str, cfg: Optional[IJepaConfig] = None, debug: bool = False
+) -> IJEPA_base:
     cfg = cfg or default_config()
     module = IJEPA_base(
         img_size=cfg.model.img_size,
@@ -108,7 +124,10 @@ def load_backbone_from_checkpoint(checkpoint_path: str, cfg: Optional[IJepaConfi
         layer_dropout=cfg.model.layer_dropout,
         backbone=cfg.model.classification_backbone,
         pretrained=cfg.model.classification_pretrained,
+        debug=debug,
     )
+    if debug:
+        print(f"[DEBUG] Loading checkpoint from {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     student_state = checkpoint.get("student") or checkpoint
     module.student_encoder.load_state_dict(student_state)
@@ -116,6 +135,11 @@ def load_backbone_from_checkpoint(checkpoint_path: str, cfg: Optional[IJepaConfi
         module.teacher_encoder.load_state_dict(checkpoint["teacher"])
     if "predictor" in checkpoint:
         module.predictor.load_state_dict(checkpoint["predictor"])
+    if debug:
+        print(
+            f"[DEBUG] Loaded student keys={len(student_state)} teacher_present={'teacher' in checkpoint} "
+            f"predictor_present={'predictor' in checkpoint}"
+        )
     module.set_mode("test")
     module.eval()
     return module
@@ -126,13 +150,14 @@ def _train_one_epoch(
     loader: DataLoader,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
+    debug: bool = False,
 ) -> Tuple[float, float]:
     criterion = nn.CrossEntropyLoss()
     model.train()
     total_loss = 0.0
     total_correct = 0
     total = 0
-    for images, labels in loader:
+    for batch_idx, (images, labels) in enumerate(loader):
         images = images.to(device)
         labels = labels.to(device)
         logits = model(images)
@@ -143,22 +168,33 @@ def _train_one_epoch(
         total_loss += loss.item() * images.size(0)
         total_correct += (logits.argmax(dim=1) == labels).sum().item()
         total += images.size(0)
+        if debug and batch_idx == 0:
+            print(
+                f"[DEBUG] First train batch: images={tuple(images.shape)} logits={tuple(logits.shape)} "
+                f"loss={loss.item():.4f}"
+            )
     avg_loss = total_loss / max(1, total)
     accuracy = total_correct / max(1, total)
     return avg_loss, accuracy
 
 
-def _evaluate(model: LinearProbe, loader: DataLoader, device: torch.device) -> float:
+def _evaluate(
+    model: LinearProbe, loader: DataLoader, device: torch.device, debug: bool = False
+) -> float:
     model.eval()
     total_correct = 0
     total = 0
     with torch.no_grad():
-        for images, labels in loader:
+        for batch_idx, (images, labels) in enumerate(loader):
             images = images.to(device)
             labels = labels.to(device)
             logits = model(images)
             total_correct += (logits.argmax(dim=1) == labels).sum().item()
             total += images.size(0)
+            if debug and batch_idx == 0:
+                print(
+                    f"[DEBUG] Eval batch: images={tuple(images.shape)} logits={tuple(logits.shape)}"
+                )
     return total_correct / max(1, total)
 
 
@@ -177,8 +213,10 @@ def _train_linear_probe_once(
     )
     accuracies: List[float] = []
     for epoch in range(cfg.epochs):
-        loss, acc = _train_one_epoch(model, train_loader, optimizer, device)
-        val_acc = _evaluate(model, eval_loader, device)
+        loss, acc = _train_one_epoch(
+            model, train_loader, optimizer, device, debug=cfg.debug
+        )
+        val_acc = _evaluate(model, eval_loader, device, debug=cfg.debug)
         accuracies.append(val_acc)
         print(
             f"[Linear probe] Epoch {epoch + 1}/{cfg.epochs} "
@@ -193,7 +231,9 @@ def train_linear_probe(ft_cfg: Optional[FinetuneConfig] = None) -> LinearProbe:
     if ft_cfg.checkpoint_path is None:
         raise ValueError("A pretrained checkpoint path must be provided for fine-tuning.")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    backbone = load_backbone_from_checkpoint(ft_cfg.checkpoint_path, cfg)
+    if ft_cfg.debug:
+        print(f"[DEBUG] Using device {device} for fine-tuning")
+    backbone = load_backbone_from_checkpoint(ft_cfg.checkpoint_path, cfg, debug=ft_cfg.debug)
     backbone.to(device)
     model = LinearProbe(backbone, ft_cfg.num_classes).to(device)
     optimizer = torch.optim.Adam(
@@ -201,13 +241,17 @@ def train_linear_probe(ft_cfg: Optional[FinetuneConfig] = None) -> LinearProbe:
         lr=ft_cfg.learning_rate,
         weight_decay=ft_cfg.weight_decay,
     )
-    train_loader = create_finetune_dataloader(cfg, train=True, batch_size=ft_cfg.batch_size)
+    train_loader = create_finetune_dataloader(
+        cfg, train=True, batch_size=ft_cfg.batch_size, debug=ft_cfg.debug
+    )
     eval_loader = create_finetune_dataloader(
-        cfg, train=False, batch_size=ft_cfg.batch_size
+        cfg, train=False, batch_size=ft_cfg.batch_size, debug=ft_cfg.debug
     )
     for epoch in range(ft_cfg.epochs):
-        loss, acc = _train_one_epoch(model, train_loader, optimizer, device)
-        val_acc = _evaluate(model, eval_loader, device)
+        loss, acc = _train_one_epoch(
+            model, train_loader, optimizer, device, debug=ft_cfg.debug
+        )
+        val_acc = _evaluate(model, eval_loader, device, debug=ft_cfg.debug)
         print(
             f"[Linear probe] Epoch {epoch + 1}/{ft_cfg.epochs} "
             f"| loss={loss:.4f} | train_acc={acc:.3f} | val_acc={val_acc:.3f}"
@@ -224,7 +268,9 @@ def compare_pretrained_vs_scratch(ft_cfg: FinetuneConfig) -> FinetuneReport:
     eval_loader = create_finetune_dataloader(cfg, train=False, batch_size=ft_cfg.batch_size)
 
     # Pretrained probe
-    pretrained_backbone = load_backbone_from_checkpoint(ft_cfg.checkpoint_path, cfg)
+    pretrained_backbone = load_backbone_from_checkpoint(
+        ft_cfg.checkpoint_path, cfg, debug=ft_cfg.debug
+    )
     pretrained_backbone.to(device)
     pretrained_acc = _train_linear_probe_once(
         pretrained_backbone, ft_cfg, device, train_loader, eval_loader
@@ -244,6 +290,7 @@ def compare_pretrained_vs_scratch(ft_cfg: FinetuneConfig) -> FinetuneReport:
         layer_dropout=cfg.model.layer_dropout,
         backbone=cfg.model.classification_backbone,
         pretrained=cfg.model.classification_pretrained,
+        debug=ft_cfg.debug,
     ).to(device)
     scratch_acc = _train_linear_probe_once(
         scratch_backbone, ft_cfg, device, train_loader, eval_loader
@@ -260,6 +307,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--num-classes", type=int, default=100)
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose debugging output for fine-tuning setup and IO",
+    )
     return parser.parse_args()
 
 
@@ -272,7 +324,10 @@ def main() -> None:
         weight_decay=args.weight_decay,
         num_classes=args.num_classes,
         checkpoint_path=args.checkpoint,
+        debug=args.debug,
     )
+    if args.debug:
+        print(f"[DEBUG] Fine-tune config: {ft_cfg}")
     train_linear_probe(ft_cfg)
 
 

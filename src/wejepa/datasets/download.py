@@ -31,6 +31,7 @@ def download(
     dataset_root: str | Path,
     dataset_name: str = "cifar100",
     splits: Iterable[str] = ("train", "test"),
+    debug: bool = False,
 ) -> Mapping[str, Path]:
     """Download datasets splits into ``dataset_root`` if needed.
 
@@ -49,6 +50,10 @@ def download(
     """
 
     root = _normalize_root(dataset_root)
+    if debug:
+        print(
+            f"[DEBUG] Preparing download for dataset={dataset_name} splits={tuple(splits)} root={root}"
+        )
     downloaded: MutableMapping[str, Path] = {}
     # normalize dataset name for matching common variants
     dataset_key = str(dataset_name).lower().replace("_", "").replace("-", "")
@@ -59,6 +64,8 @@ def download(
             if split not in _VALID_SPLITS:
                 raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
             train_flag = split == "train"
+            if debug:
+                print(f"[DEBUG] Requesting CIFAR100 split='{split}' at {root}")
             CIFAR100(root=str(root), train=train_flag, download=True)
         elif dataset_key.startswith("cub200") or dataset_key.startswith("cub"):
             # support variants like 'cub200', 'cub_200_2011', 'CUB-200'
@@ -80,6 +87,10 @@ def download(
             downloaded[split] = root
             continue
         else:
+            if debug:
+                print(
+                    f"[DEBUG] Loading HuggingFace dataset '{dataset_name}' split='{split}' cache_dir={root}"
+                )
             datasets.load_dataset(dataset_name, split=split, cache_dir=str(root))
 
         downloaded[split] = root
@@ -112,6 +123,11 @@ def _parse_args() -> argparse.Namespace:
         # choices=sorted(_VALID_SPLITS),
         help="Which dataset splits to materialize.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose download logging",
+    )
     return parser.parse_args()
 
 
@@ -119,7 +135,9 @@ def main() -> None:
     """Command-line entrypoint used via ``python -m wejepa.data.download``."""
 
     args = _parse_args()
-    downloads = download(args.dataset_root, args.dataset_name, splits=args.splits)
+    downloads = download(
+        args.dataset_root, args.dataset_name, splits=args.splits, debug=args.debug
+    )
     for split, root in downloads.items():
         print(f"Split '{split}' available under {root}")
 

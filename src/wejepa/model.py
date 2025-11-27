@@ -143,13 +143,16 @@ class IJEPA_base(nn.Module):
         layer_dropout: float = 0.0,
         backbone: str = None,
         pretrained: bool = False,
+        debug: bool = False,
     ) -> None:
         super().__init__()
         del layer_dropout  # kept for backwards compatibility
+        self.debug = debug
         self.M = M
         self.mode = mode
         self.backbone = None
         self.patch_embed = None
+        self._debug_logged = False
 
         if backbone is not None:
             spec = get_backbone_spec(backbone)
@@ -163,6 +166,12 @@ class IJEPA_base(nn.Module):
             patch_size = self.backbone.patch_size
             num_heads = choose_num_heads(embed_dim, spec.default_num_heads, num_heads)
 
+            if self.debug:
+                print(
+                    f"[DEBUG] Using backbone '{backbone}' | hidden_dim={embed_dim} "
+                    f"image_size={img_size} patch_size={patch_size} num_heads={num_heads}"
+                )
+
             # so that everything downstream sees compatible shapes
             self.patch_dim = getattr(self.backbone, "patch_dim", None) or (
                 img_size // patch_size,
@@ -174,6 +183,11 @@ class IJEPA_base(nn.Module):
             self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
             self.patch_dim = self.patch_embed.patch_shape
             self.num_tokens = self.patch_dim[0] * self.patch_dim[1]
+            if self.debug:
+                print(
+                    f"[DEBUG] Using PatchEmbed img_size={img_size} patch_size={patch_size} "
+                    f"num_tokens={self.num_tokens}"
+                )
 
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_tokens, embed_dim))
         self.mask_token = nn.Parameter(torch.randn(1, 1, embed_dim))
@@ -194,6 +208,11 @@ class IJEPA_base(nn.Module):
         seq_len = tokens.shape[1]
         if seq_len == self.pos_embedding.shape[1]:
             return
+
+        if self.debug:
+            print(
+                f"[DEBUG] Resizing positional embeddings from {self.pos_embedding.shape[1]} to {seq_len} tokens"
+            )
 
         old_tokens = self.pos_embedding.shape[1]
         old_h = int(math.sqrt(old_tokens)) or 1
@@ -276,6 +295,11 @@ class IJEPA_base(nn.Module):
                         all_patches.append(idx)
             target_patches.append(patches)
             target_block[block_idx] = enc[:, patches, :]
+            if self.debug and not self._debug_logged:
+                print(
+                    f"[DEBUG] Target block {block_idx}: start=({start_patch_h},{start_patch_w}) size=({block_h},{block_w}) "
+                    f"patch_count={len(patches)}"
+                )
         return target_block, target_patches, all_patches
 
     def get_context_block(
@@ -306,6 +330,11 @@ class IJEPA_base(nn.Module):
         if not patches:
             available = [idx for idx in range(num_tokens) if idx not in target_set]
             patches = available if available else list(range(num_tokens))
+        if self.debug and not self._debug_logged:
+            print(
+                f"[DEBUG] Context block start=({start_patch_h},{start_patch_w}) size=({block_h},{block_w}) "
+                f"patches_used={len(patches)}"
+            )
         return x[:, patches, :]
 
     def forward(
@@ -316,7 +345,7 @@ class IJEPA_base(nn.Module):
         context_aspect_ratio: float = 1.0,
         context_scale: float = 0.9,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        #print("Forward pass in mode:", self.mode)
+        self._debug_logged = False
         # get tokens from either backbone or PatchEmbed
         if self.backbone is not None:
             tokens = self.backbone(x)                     # B x N x D
@@ -325,7 +354,10 @@ class IJEPA_base(nn.Module):
         else:
             tokens = x
 
-        #print("Tokens shape:", tokens.shape)
+        if self.debug and not self._debug_logged:
+            print(
+                f"[DEBUG] Forward mode={self.mode} input={tuple(x.shape)} tokens={tuple(tokens.shape)}"
+            )
         # add positional embeddings and norm
         self._maybe_resize_positional_embedding(tokens)
         tokens = tokens + self.pos_embedding              # B x N x D
@@ -352,7 +384,11 @@ class IJEPA_base(nn.Module):
             context_aspect_ratio,
             context_scale,
             all_patches,
-        ) 
+        )
+        if self.debug and not self._debug_logged:
+            print(
+                f"[DEBUG] Context encoding shape before predictor: {tuple(context_block.shape)}"
+            )
         context_encoding = self.student_encoder(context_block)
         context_encoding = self.norm(context_encoding)
         m, bsz, n_tok, embed_dim = target_blocks.shape
@@ -363,6 +399,12 @@ class IJEPA_base(nn.Module):
             pos_embed = self.pos_embedding[:, target_patches[i], :]
             target_masks = target_masks + pos_embed
             prediction_blocks[i] = self.predictor(context_encoding, target_masks)
+            if self.debug and not self._debug_logged:
+                print(
+                    f"[DEBUG] Prediction block {i}: masks={tuple(target_masks.shape)} "
+                    f"prediction={tuple(prediction_blocks[i].shape)} target={tuple(target_blocks[i].shape)}"
+                )
+        self._debug_logged = True
         return prediction_blocks, target_blocks
 
     # number of parameters (student + predictor)
