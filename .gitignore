@@ -232,3 +232,5 @@ data/
 
 #### Ignore experiment configs
 experiments/configs
+
+**/*.wejepa_config.json
