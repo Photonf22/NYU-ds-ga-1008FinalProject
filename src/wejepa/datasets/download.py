@@ -20,6 +20,9 @@ import datasets
 import urllib.request
 import tarfile
 
+# For CUB-200 postprocessing
+from .cub200 import CUB200Dataset
+
 _VALID_SPLITS = {"train", "test"}
 
 
@@ -117,8 +120,10 @@ def download(
                 with tarfile.open(tar_path, 'r:gz') as tar:
                     tar.extractall(root)
                 print("Extraction complete!")
-            # For compatibility with split-driven callers, return the root path for each split
-            
+
+            print("Generating CUB-200 train/val/test splits")
+            CUB200Dataset._try_generate_cub200_metadata(root)
+
             downloaded[split] = root
             continue
         else:

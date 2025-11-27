@@ -11,7 +11,9 @@ from typing import List, Optional, Tuple
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
+
 import torchvision
+from ..datasets.image_dataset import ImageDataset
 
 from ..config import IJepaConfig, default_config
 from ..datasets.cifar import build_eval_transform, build_train_transform
@@ -59,46 +61,89 @@ class LinearProbe(nn.Module):
         return self.head(pooled)
 
 
-def _cifar_dataset(cfg: IJepaConfig, train: bool, debug: bool = False) -> torchvision.datasets.CIFAR100:
-    transform = build_train_transform(cfg) if train else build_eval_transform(cfg)
+
+
+def _build_dataset(cfg: IJepaConfig, train: bool, debug: bool = False):
+    name = getattr(cfg.data, 'dataset_name', 'cifar100').lower()
+    # Use CUB-200-specific transforms if needed
+    if name in ["cub200", "cub-200", "cub", "cub-200-2011"]:
+        from ..datasets.cub200 import build_cub_train_transform, build_cub_eval_transform
+        transform = build_cub_train_transform(cfg) if train else build_cub_eval_transform(cfg)
+    else:
+        transform = build_train_transform(cfg) if train else build_eval_transform(cfg)
     if cfg.data.use_fake_data:
         if debug:
-            print(
-                f"[DEBUG] Using FakeData with size={cfg.data.fake_data_size} for {'train' if train else 'eval'}"
-            )
+            print(f"[DEBUG] Using FakeData with size={cfg.data.fake_data_size} for {'train' if train else 'eval'}")
         return torchvision.datasets.FakeData(
             size=cfg.data.fake_data_size,
             image_size=(3, cfg.data.image_size, cfg.data.image_size),
             num_classes=max(cfg.data.fake_data_size, cfg.data.eval_batch_size),
             transform=transform,
         )
-    if debug:
-        print(
-            f"[DEBUG] Loading CIFAR100 train={train} root={cfg.data.dataset_root} transform={transform}"
+    if name in ["cifar100", "cifar-100"]:
+        if debug:
+            print(f"[DEBUG] Loading CIFAR100 train={train} root={cfg.data.dataset_root} transform={transform}")
+        return torchvision.datasets.CIFAR100(
+            root=cfg.data.dataset_root,
+            train=train,
+            transform=transform,
+            download=train,
         )
-    return torchvision.datasets.CIFAR100(
-        root=cfg.data.dataset_root,
-        train=train,
-        transform=transform,
-        download=train,
-    )
-    return dataset
+    elif name in ["cub200", "cub-200", "cub", "cub-200-2011"]:
+        # Use CSV-based CUB200Dataset, with CSVs in dataset_root
+        from ..datasets.cub200 import CUB200Dataset
+        split = "train" if train else "val"  # Use val for eval/validation
+        if debug:
+            print(f"[DEBUG] Loading CUB200Dataset from {cfg.data.dataset_root} split={split}")
+        return CUB200Dataset(
+            root=cfg.data.dataset_root,
+            split=split,
+            transform=transform,
+            return_labels=True,
+        )
+    elif name in ["imagefolder", "folder"]:
+        folder_dir = getattr(cfg.data, 'dataset_dir', None)
+        if folder_dir is None:
+            folder_dir = os.path.join(cfg.data.dataset_root, "images")
+        if debug:
+            print(f"[DEBUG] Loading ImageFolder from {folder_dir} train={train} transform={transform}")
+        return torchvision.datasets.ImageFolder(root=folder_dir, transform=transform)
+    elif name in ["imagedataset", "customlist", "listdataset"]:
+        # Use ImageDataset: expects image_list and (optionally) labels in config
+        image_dir = getattr(cfg.data, 'image_dir', None)
+        image_list_path = getattr(cfg.data, 'image_list', None)
+        labels_path = getattr(cfg.data, 'labels', None)
+        resolution = getattr(cfg.data, 'image_size', 224)
+        if image_dir is None or image_list_path is None:
+            raise ValueError("For ImageDataset, 'image_dir' and 'image_list' must be specified in config.data")
+        with open(image_list_path, 'r') as f:
+            image_list = [line.strip() for line in f if line.strip()]
+        labels = None
+        if labels_path is not None:
+            with open(labels_path, 'r') as f:
+                labels = [int(line.strip()) for line in f if line.strip()]
+        if debug:
+            print(f"[DEBUG] Loading ImageDataset from {image_dir} with {len(image_list)} images, labels={labels is not None}, resolution={resolution}")
+        return ImageDataset(image_dir, image_list, labels=labels, resolution=resolution)
+    else:
+        raise ValueError(f"Unknown dataset_name: {name}")
+
 
 
 def create_finetune_dataloader(
     cfg: IJepaConfig, train: bool, batch_size: Optional[int] = None, debug: bool = False
 ) -> DataLoader:
-    dataset = _cifar_dataset(cfg, train=train, debug=debug)
+    dataset = _build_dataset(cfg, train=train, debug=debug)
     kwargs = dict(
         dataset=dataset,
         batch_size=batch_size or (cfg.data.train_batch_size if train else cfg.data.eval_batch_size),
         shuffle=train,
         num_workers=cfg.data.num_workers,
-        pin_memory=cfg.data.pin_memory,
+        pin_memory=getattr(cfg.data, 'pin_memory', False),
         drop_last=train,
-        persistent_workers=cfg.data.persistent_workers and cfg.data.num_workers > 0,
+        persistent_workers=getattr(cfg.data, 'persistent_workers', False) and cfg.data.num_workers > 0,
     )
-    if cfg.data.num_workers > 0:
+    if getattr(cfg.data, 'num_workers', 0) > 0 and hasattr(cfg.data, 'prefetch_factor'):
         kwargs["prefetch_factor"] = cfg.data.prefetch_factor
     if debug:
         print(
@@ -122,7 +167,7 @@ def load_backbone_from_checkpoint(
         pred_depth=cfg.model.pred_depth,
         num_heads=cfg.model.num_heads,
         post_emb_norm=cfg.model.post_emb_norm,
-        M=cfg.mask.num_target_blocks,
+        M=None,
         layer_dropout=cfg.model.layer_dropout,
         backbone=cfg.model.classification_backbone,
         pretrained=cfg.model.classification_pretrained,
@@ -288,7 +333,8 @@ def compare_pretrained_vs_scratch(ft_cfg: FinetuneConfig) -> FinetuneReport:
         pred_depth=cfg.model.pred_depth,
         num_heads=cfg.model.num_heads,
         post_emb_norm=cfg.model.post_emb_norm,
-        M=cfg.mask.num_target_blocks,
+        # Do not use mask config for finetuning
+        M=None,
         layer_dropout=cfg.model.layer_dropout,
         backbone=cfg.model.classification_backbone,
         pretrained=cfg.model.classification_pretrained,
@@ -327,12 +373,23 @@ def main() -> None:
             raise FileNotFoundError(f"Config file not found: {args.config}")
         with open(args.config, "r") as f:
             config_data = json.load(f)
-    # Build FinetuneConfig from config file, then override with CLI args if provided
-    ft_cfg = FinetuneConfig()
-    # Update from config file
-    for k, v in config_data.items():
-        if hasattr(ft_cfg, k):
-            setattr(ft_cfg, k, v)
+    # Build FinetuneConfig, ensuring ijepa is loaded as IJepaConfig from config file if present
+    if config_data:
+        # If config_data is a flat dict, treat as IJepaConfig
+        if "model" in config_data and "data" in config_data:
+            ijepa_cfg = IJepaConfig.from_dict(config_data)
+        # If config_data is a FinetuneConfig dict with 'ijepa' key
+        elif "ijepa" in config_data:
+            ijepa_cfg = IJepaConfig.from_dict(config_data["ijepa"])
+        else:
+            ijepa_cfg = default_config()
+        ft_cfg = FinetuneConfig(ijepa=ijepa_cfg)
+        # Set other FinetuneConfig fields if present in config_data
+        for k, v in config_data.items():
+            if hasattr(ft_cfg, k) and k != "ijepa":
+                setattr(ft_cfg, k, v)
+    else:
+        ft_cfg = FinetuneConfig()
     # CLI args override config file
     if args.epochs is not None:
         ft_cfg.epochs = args.epochs

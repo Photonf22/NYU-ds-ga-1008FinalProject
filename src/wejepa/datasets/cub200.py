@@ -113,6 +113,7 @@ class CUB200Dataset(Dataset):
         if not cub_dir.exists():
             # Try if dataset_root itself is the CUB_200_2011 dir
             cub_dir = dataset_root
+
         # Check for required files
         required_files = [
             cub_dir / 'images.txt',

@@ -35,6 +35,10 @@ class DataConfig:
     normalization_std: Tuple[float, float, float] = (0.2675, 0.2565, 0.2761)
     use_fake_data: bool = False
     fake_data_size: int = 512
+    # For custom list-based datasets
+    image_dir: Optional[str] = None
+    image_list: Optional[str] = None
+    labels: Optional[str] = None
 
 
 @dataclass
@@ -118,12 +122,17 @@ class IJepaConfig:
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "IJepaConfig":
+        data = DataConfig(**payload["data"])
+        mask = MaskConfig(**payload["mask"]) if "mask" in payload else MaskConfig()
+        model = ModelConfig(**payload["model"]) if "model" in payload else ModelConfig()
+        optimizer = OptimizerConfig(**payload["optimizer"]) if "optimizer" in payload else OptimizerConfig()
+        hardware = HardwareConfig(**payload["hardware"]) if "hardware" in payload else HardwareConfig()
         return cls(
-            data=DataConfig(**payload["data"]),
-            mask=MaskConfig(**payload["mask"]),
-            model=ModelConfig(**payload["model"]),
-            optimizer=OptimizerConfig(**payload["optimizer"]),
-            hardware=HardwareConfig(**payload["hardware"]),
+            data=data,
+            mask=mask,
+            model=model,
+            optimizer=optimizer,
+            hardware=hardware,
         )
 
     def summary(self) -> str:
