@@ -195,7 +195,11 @@ def main() -> None:
 
     args = _parse_args()
     downloads = download(
-        args.dataset_root, args.dataset_name, splits=args.splits, debug=args.debug
+        args.dataset_root, 
+        args.dataset_name, 
+        snapshot_download=args.snapshot_download,
+        splits=args.splits, 
+        debug=args.debug
     )
     for split, root in downloads.items():
         print(f"Split '{split}' available under {root}")
