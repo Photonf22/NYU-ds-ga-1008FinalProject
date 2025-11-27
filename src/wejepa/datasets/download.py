@@ -136,13 +136,18 @@ def download(
                     revision="main",
                     local_dir=str(target_dir),
                 )
+                if debug:
+                    print(
+                        f"[DEBUG] Using snapshot_download for dataset '{dataset_name}' split='{split}'"
+                    )
+                    print(
+                        f"[DEBUG] Downloaded dataset to {target_dir}, extracting archives if any."
+                    )
                 # Always try to extract archives after download
                 extract_archives(target_dir)
                 downloaded[split] = target_dir
             else:
                 downloaded[split] = root
-
-        downloaded[split] = root
     return downloaded
 
 def _parse_args() -> argparse.Namespace:
