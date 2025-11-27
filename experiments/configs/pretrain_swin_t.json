@@ -1,41 +1,63 @@
 {
   "data": {
-    "dataset_root": "./data",
-    "dataset_name": "imagefolder",
-    "dataset_dir": "tsbpp_fall2025_deeplearning",
+    "dataset_root": "/home/long/PhD/Coursework/Deep_Learning/Project/Code/ijepa/experiments/data",
+    "dataset_name": "cifar100",
     "image_size": 224,
     "train_batch_size": 256,
     "eval_batch_size": 512,
-    "num_workers": 16,
+    "num_workers": 4,
     "pin_memory": true,
     "persistent_workers": true,
     "prefetch_factor": 2,
-    "crop_scale": [0.6, 1.0],
+    "crop_scale": [
+      0.6,
+      1.0
+    ],
     "color_jitter": 0.5,
     "use_color_distortion": true,
     "use_horizontal_flip": true,
-    "normalization_mean": [0.485, 0.456, 0.406],
-    "normalization_std": [0.229, 0.224, 0.225],
+    "normalization_mean": [
+      0.5071,
+      0.4867,
+      0.4408
+    ],
+    "normalization_std": [
+      0.2675,
+      0.2565,
+      0.2761
+    ],
     "use_fake_data": false,
     "fake_data_size": 512
   },
   "mask": {
-    "target_aspect_ratio": [0.75, 1.5],
-    "target_scale": [0.15, 0.2],
+    "target_aspect_ratio": [
+      0.75,
+      1.5
+    ],
+    "target_scale": [
+      0.15,
+      0.2
+    ],
     "context_aspect_ratio": 1.0,
-    "context_scale": [0.85, 1.0],
+    "context_scale": [
+      0.85,
+      1.0
+    ],
     "num_target_blocks": 4
   },
   "model": {
     "img_size": 224,
-    "patch_size": 16,
+    "patch_size": 4,
     "in_chans": 3,
-    "embed_dim": 192,
+    "embed_dim": 768,
     "enc_depth": 6,
     "pred_depth": 4,
-    "num_heads": 6,
+    "num_heads": 12,
     "post_emb_norm": false,
-    "layer_dropout": 0.0
+    "layer_dropout": 0.0,
+    "classification_backbone": "swin_t",
+    "classification_num_classes": 100,
+    "classification_pretrained": false
   },
   "optimizer": {
     "epochs": 5,
@@ -45,19 +67,22 @@
     "final_learning_rate": 1e-05,
     "weight_decay": 0.05,
     "final_weight_decay": 0.2,
-    "betas": [0.9, 0.95],
+    "betas": [
+      0.9,
+      0.95
+    ],
     "eps": 1e-08,
     "grad_clip_norm": 1.0,
     "momentum_teacher": 0.996,
     "momentum_teacher_final": 1.0
   },
   "hardware": {
-    "world_size": 4,
     "seed": 42,
+    "world_size": null,
     "mixed_precision": true,
     "compile_model": false,
     "log_every": 50,
     "checkpoint_every": 1,
-    "output_dir": "./outputs/ijepa"
+    "output_dir": "./outputs/ijepa/swin_t"
   }
 }

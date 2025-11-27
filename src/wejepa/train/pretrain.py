@@ -27,6 +27,9 @@ from ..config import IJepaConfig, default_config
 from ..datasets import create_pretraining_dataloader
 from ..model import IJEPA_base
 
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+
 """
 Track avg and current value of a metric over time.
 """
@@ -112,7 +115,11 @@ def _setup_distributed(rank: int, world_size: int) -> None:
     backend = "nccl" if torch.cuda.is_available() else "gloo"
     os.environ.setdefault("MASTER_ADDR", "localhost")
     os.environ.setdefault("MASTER_PORT", "12355")
-    dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
+    device_id = rank if backend == "nccl" and torch.cuda.is_available() else None
+    if device_id is not None:
+        dist.init_process_group(backend=backend, rank=rank, world_size=world_size, device_id=device_id)
+    else:
+        dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
 
 
 def _cleanup_distributed() -> None:
