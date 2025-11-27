@@ -52,7 +52,7 @@
     "momentum_teacher_final": 1.0
   },
   "hardware": {
-    "world_size": 1,
+    "world_size": 4,
     "seed": 42,
     "mixed_precision": true,
     "compile_model": false,
