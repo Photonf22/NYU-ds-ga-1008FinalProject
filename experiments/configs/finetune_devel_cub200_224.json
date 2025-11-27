@@ -1,0 +1,20 @@
+{
+  "data": {
+    "dataset_root": "./data",
+    "dataset_name": "cub200",
+    "image_size": 224,
+    "train_batch_size": 128,
+    "eval_batch_size": 256,
+    "num_workers": 8
+  },
+  "model": {
+    "img_size": 224,
+    "patch_size": 16,
+    "in_chans": 3,
+    "embed_dim": 768,
+    "enc_depth": 12,
+    "pred_depth": 4,
+    "num_heads": 12,
+    "classification_num_classes": 200
+  }
+}

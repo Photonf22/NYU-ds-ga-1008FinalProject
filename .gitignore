@@ -230,7 +230,5 @@ data/
 ## WSL stuff?
 **/*Zone.Identifier
 
-#### Ignore experiment configs
-experiments/configs
 ## client meta data
 **/*.wejepa_config.json

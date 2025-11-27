@@ -27,6 +27,9 @@ from ..config import IJepaConfig, default_config
 from ..datasets import create_pretraining_dataloader
 from ..model import IJEPA_base
 
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+
 """
 Track avg and current value of a metric over time.
 """
