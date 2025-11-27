@@ -35,6 +35,7 @@ def download(
     dataset_name: str = "cifar100",
     snapshot_download: Optional[bool] = False,
     splits: Iterable[str] = ("train", "test"),
+    debug: bool = False,
 ) -> Mapping[str, Path]:
     """Download datasets splits into ``dataset_root`` if needed.
 
@@ -53,6 +54,10 @@ def download(
     """
 
     root = _normalize_root(dataset_root)
+    if debug:
+        print(
+            f"[DEBUG] Preparing download for dataset={dataset_name} splits={tuple(splits)} root={root}"
+        )
     downloaded: MutableMapping[str, Path] = {}
     def is_hf_format(directory: Path):
         # Check for common Hugging Face dataset file types or image folders
@@ -91,9 +96,10 @@ def download(
             if split not in _VALID_SPLITS:
                 raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
             train_flag = split == "train"
-            CIFAR100(root=str(root), train=train_flag, download=True) 
-
-        if dataset_key.startswith("cub200") or dataset_key.startswith("cub"):
+            if debug:
+                print(f"[DEBUG] Requesting CIFAR100 split='{split}' at {root}")
+            CIFAR100(root=str(root), train=train_flag, download=True)
+        elif dataset_key.startswith("cub200") or dataset_key.startswith("cub"):
             # support variants like 'cub200', 'cub_200_2011', 'CUB-200'
             url = "https://data.caltech.edu/records/65de6-vp158/files/CUB_200_2011.tgz"
             tar_path = root / "CUB_200_2011.tgz"
@@ -114,8 +120,12 @@ def download(
             # For compatibility with split-driven callers, return the root path for each split
             
             downloaded[split] = root
-
+            continue
         else:
+            if debug:
+                print(
+                    f"[DEBUG] Loading HuggingFace dataset '{dataset_name}' split='{split}' cache_dir={root}"
+                )
             datasets.load_dataset(dataset_name, split=split, cache_dir=str(root))
             if snapshot_download:
                 target_dir = root / f"{dataset_name.replace('/', '_')}"
@@ -132,6 +142,7 @@ def download(
             else:
                 downloaded[split] = root
 
+        downloaded[split] = root
     return downloaded
 
 def _parse_args() -> argparse.Namespace:
@@ -166,6 +177,11 @@ def _parse_args() -> argparse.Namespace:
         # choices=sorted(_VALID_SPLITS),
         help="Which dataset splits to materialize.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose download logging",
+    )
     return parser.parse_args()
 
 
@@ -173,10 +189,9 @@ def main() -> None:
     """Command-line entrypoint used via ``python -m wejepa.data.download``."""
 
     args = _parse_args()
-    downloads = download(args.dataset_root, 
-                         args.dataset_name, 
-                         snapshot_download=args.snapshot_download, 
-                         splits=args.splits)
+    downloads = download(
+        args.dataset_root, args.dataset_name, splits=args.splits, debug=args.debug
+    )
     for split, root in downloads.items():
         print(f"Split '{split}' available under {root}")
 

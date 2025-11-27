@@ -1,11 +1,12 @@
 {
   "data": {
     "dataset_root": "./data",
-    "dataset_name": "tsbpp___fall2025_deeplearning",
-    "image_size": 32,
+    "dataset_name": "imagefolder",
+    "dataset_dir": "tsbpp_fall2025_deeplearning",
+    "image_size": 224,
     "train_batch_size": 256,
     "eval_batch_size": 512,
-    "num_workers": 4,
+    "num_workers": 16,
     "pin_memory": true,
     "persistent_workers": true,
     "prefetch_factor": 2,
@@ -13,8 +14,8 @@
     "color_jitter": 0.5,
     "use_color_distortion": true,
     "use_horizontal_flip": true,
-    "normalization_mean": [0.5071, 0.4867, 0.4408],
-    "normalization_std": [0.2675, 0.2565, 0.2761],
+    "normalization_mean": [0.485, 0.456, 0.406],
+    "normalization_std": [0.229, 0.224, 0.225],
     "use_fake_data": false,
     "fake_data_size": 512
   },
@@ -26,8 +27,8 @@
     "num_target_blocks": 4
   },
   "model": {
-    "img_size": 32,
-    "patch_size": 4,
+    "img_size": 224,
+    "patch_size": 16,
     "in_chans": 3,
     "embed_dim": 192,
     "enc_depth": 6,
@@ -51,6 +52,7 @@
     "momentum_teacher_final": 1.0
   },
   "hardware": {
+    "world_size": 1,
     "seed": 42,
     "mixed_precision": true,
     "compile_model": false,

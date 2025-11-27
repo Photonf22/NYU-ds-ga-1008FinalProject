@@ -1,16 +1,15 @@
-"""Training entrypoint for the WE-JEPA."""
+"""
+Pretraining entrypoint
+"""
 from __future__ import annotations
 
 import argparse
 import json
 import math
 import os
-import argparse
-import json
-import math
-import os
 import random
 import time
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
@@ -28,7 +27,9 @@ from ..config import IJepaConfig, default_config
 from ..datasets import create_pretraining_dataloader
 from ..model import IJEPA_base
 
-
+"""
+Track avg and current value of a metric over time.
+"""
 class AverageMeter:
     def __init__(self) -> None:
         self.reset()
@@ -81,7 +82,7 @@ def _cosine_schedule(
     return schedule
 
 
-def _build_model(cfg: IJepaConfig) -> IJEPA_base:
+def _build_model(cfg: IJepaConfig, debug: bool = False) -> IJEPA_base:
     mcfg = cfg.model
     model = IJEPA_base(
         img_size=mcfg.img_size,
@@ -96,7 +97,14 @@ def _build_model(cfg: IJepaConfig) -> IJEPA_base:
         layer_dropout=mcfg.layer_dropout,
         backbone=mcfg.classification_backbone,
         pretrained=mcfg.classification_pretrained,
+        debug=debug,
     )
+    if debug:
+        print(
+            "[DEBUG] Built model with",
+            f"img_size={mcfg.img_size}, patch_size={mcfg.patch_size}, embed_dim={mcfg.embed_dim},",
+            f"enc_depth={mcfg.enc_depth}, pred_depth={mcfg.pred_depth}, num_heads={mcfg.num_heads}",
+        )
     return model
 
 
@@ -118,6 +126,7 @@ def save_checkpoint(
     state: TrainState,
     epoch: int,
     cfg: IJepaConfig,
+    debug: bool = False,
 ) -> Path:
     output_dir = Path(cfg.hardware.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -131,6 +140,17 @@ def save_checkpoint(
     }
     ckpt_path = output_dir / f"ijepa_epoch_{epoch + 1:04d}.pt"
     torch.save(ckpt, ckpt_path)
+    if debug:
+        print(
+            "[DEBUG] Saved checkpoint components:",
+            {
+                "epoch": epoch + 1,
+                "step": state.step,
+                "student": len(ckpt["student"]),
+                "teacher": len(ckpt["teacher"]),
+                "predictor": len(ckpt["predictor"]),
+            },
+        )
     return ckpt_path
 
 
@@ -147,6 +167,7 @@ def train_one_epoch(
     cfg: IJepaConfig,
     device: torch.device,
     rank: int,
+    debug: bool = False,
 ) -> Dict[str, float]:
     model.train()
     criterion = torch.nn.MSELoss()
@@ -154,32 +175,36 @@ def train_one_epoch(
     start_time = time.time()
     module = model.module if isinstance(model, DDP) else model
     accum = 1
-    #print("Training with accum =", accum)
-    #print("Length of data loader:", len(data_loader))
-    # try:
-    #     images = next(iter(data_loader))
-    #     print("First batch shape:", images.shape)
-    # except Exception as e:
-    #     print("Error loading batch:", e)
     for itr, images in enumerate(tqdm(data_loader, desc="Training", total=len(data_loader), dynamic_ncols=True)):
         images = images.to(device, non_blocking=True)
         schedule_idx = state.step
-        #print("Schedule idx:", schedule_idx)
+        if debug and itr == 0 and rank == 0:
+            print(
+                f"[DEBUG] Starting epoch {epoch + 1} with batch shape {tuple(images.shape)} "
+                f"and schedule idx {schedule_idx}"
+            )
         if schedule_idx < len(lr_schedule):
-            #print("Updating learning rate and weight decay")
             lr = float(lr_schedule[schedule_idx])
             wd = float(wd_schedule[schedule_idx])
             for param_group in optimizer.param_groups:
                 param_group["lr"] = lr
                 param_group["weight_decay"] = wd
-            #print("Learning rate:", lr)
+            if debug and itr % max(1, cfg.hardware.log_every) == 0 and rank == 0:
+                print(
+                    f"[DEBUG] Step {schedule_idx}: lr={lr:.6f}, weight_decay={wd:.6f}"
+                )
         target_aspect_ratio = random.uniform(*cfg.mask.target_aspect_ratio)
         target_scale = random.uniform(*cfg.mask.target_scale)
         context_scale = random.uniform(*cfg.mask.context_scale)
         context_aspect_ratio = cfg.mask.context_aspect_ratio
         use_amp = cfg.hardware.mixed_precision and device.type == "cuda"
         dtype = torch.bfloat16 if use_amp else None  # or torch.float16 if you prefer
-        #print("Using AMP:", use_amp, "with dtype:", dtype)
+        if debug and itr == 0 and rank == 0:
+            print(
+                f"[DEBUG] Mask params: target_ar={target_aspect_ratio:.3f}, target_scale={target_scale:.3f}, "
+                f"context_ar={context_aspect_ratio:.3f}, context_scale={context_scale:.3f}"
+            )
+            print(f"[DEBUG] Using AMP={use_amp} dtype={dtype}")
         with amp.autocast("cuda", enabled=use_amp, dtype=dtype):
             preds, targets = module(
                 images,
@@ -189,7 +214,11 @@ def train_one_epoch(
                 context_scale=context_scale,
             )
             loss = criterion(preds, targets) / accum
-        #print(f"Iteration {itr + 1}: loss = {loss.item() * accum:.4f}")
+        if debug and itr % max(1, cfg.hardware.log_every) == 0 and rank == 0:
+            print(
+                f"[DEBUG] Iter {itr + 1}: preds={tuple(preds.shape)}, targets={tuple(targets.shape)}, "
+                f"loss={loss.item() * accum:.4f}"
+            )
         if scaler is not None:
             scaler.scale(loss).backward()
         else:
@@ -222,26 +251,33 @@ def train_one_epoch(
     return {"loss": loss_meter.avg}
 
 
-def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None:
+def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict], debug: bool = False) -> None:
     cfg = IJepaConfig.from_dict(cfg_dict)
     _set_seed(cfg.hardware.seed, rank)
     # prepare device
     device = torch.device("cuda", rank) if torch.cuda.is_available() else torch.device("cpu")
-    #print("Using device:", device)
+    if debug and rank == 0:
+        print(
+            f"[DEBUG] Rank {rank} using device {device} | world_size={world_size} "
+            f"| seed={cfg.hardware.seed}"
+        )
     if world_size > 1:
         _setup_distributed(rank, world_size)
         if torch.cuda.is_available():
             torch.cuda.set_device(device)
-    #print("Building model...")
-    model = _build_model(cfg).to(device)
+    model = _build_model(cfg, debug=debug).to(device)
     if rank == 0:
         print(f"Model has {model.count_parameters():,} trainable parameters.")
     if cfg.hardware.compile_model and hasattr(torch, "compile"):
         model = torch.compile(model)  # type: ignore[attr-defined]
     if world_size > 1:
         model = DDP(model, device_ids=[device.index] if device.type == "cuda" else None)
-    # create optimizer
-    #print("Creating optimizer...")
+    if debug and rank == 0:
+        print(
+            f"[DEBUG] Optimizer AdamW lr={cfg.optimizer.base_learning_rate} "
+            f"betas={cfg.optimizer.betas} eps={cfg.optimizer.eps} "
+            f"weight_decay={cfg.optimizer.weight_decay}"
+        )
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=cfg.optimizer.base_learning_rate,
@@ -249,8 +285,11 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
         eps=cfg.optimizer.eps,
         weight_decay=cfg.optimizer.weight_decay,
     )
-    # prepare training components
-    #print("Preparing data loader...")
+    if debug and rank == 0:
+        print(
+            f"[DEBUG] Preparing dataloader with batch_size={cfg.data.train_batch_size}, "
+            f"num_workers={cfg.data.num_workers}"
+        )
     use_amp = cfg.hardware.mixed_precision and device.type == "cuda"
     scaler = amp.GradScaler("cuda", enabled=use_amp)
     data_loader, sampler = create_pretraining_dataloader(cfg, rank=rank, world_size=world_size)
@@ -264,8 +303,10 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
         warmup_steps,
         start_value=cfg.optimizer.start_learning_rate,
     )
-    # prepare weight decay and momentum schedules
-    #print("Preparing schedules...")
+    if debug and rank == 0:
+        print(
+            f"[DEBUG] total_steps={total_steps}, warmup_steps={warmup_steps}, steps_per_epoch={steps_per_epoch}"
+        )
     wd_schedule = _cosine_schedule(
         cfg.optimizer.weight_decay,
         cfg.optimizer.final_weight_decay,
@@ -281,14 +322,11 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
         start_value=cfg.optimizer.momentum_teacher,
     )
     state = TrainState()
-    # training loop
-    #print("Starting training...")
+    if debug and rank == 0:
+        print("[DEBUG] Starting training loop...")
     for epoch in range(cfg.optimizer.epochs):
-        #print("Epoch", epoch + 1)
         if sampler is not None:
-            #print("Setting sampler epoch to", epoch)
             sampler.set_epoch(epoch)
-        #print("Running training epoch...")
         stats = train_one_epoch(
             model,
             data_loader,
@@ -302,11 +340,12 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
             cfg,
             device,
             rank,
+            debug=debug,
         )
         print("Epoch completed.")
         if rank == 0 and (epoch + 1) % cfg.hardware.checkpoint_every == 0:
             module = model.module if isinstance(model, DDP) else model
-            ckpt_path = save_checkpoint(module, optimizer, state, epoch, cfg)
+            ckpt_path = save_checkpoint(module, optimizer, state, epoch, cfg, debug=debug)
             print(f"Saved checkpoint to {ckpt_path}")
         if rank == 0:
             print(f"Epoch {epoch + 1}/{cfg.optimizer.epochs} | loss={stats['loss']:.4f}")
@@ -314,15 +353,15 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict]) -> None
         _cleanup_distributed()
 
 
-def launch_pretraining(cfg: Optional[IJepaConfig] = None) -> None:
+def launch_pretraining(cfg: Optional[IJepaConfig] = None, debug: bool = False) -> None:
     cfg = cfg or default_config()
     world_size = cfg.hardware.world_size
     if world_size is None:
         world_size = torch.cuda.device_count() if torch.cuda.is_available() else 1
     if world_size > 1:
-        mp.spawn(_train_worker, args=(world_size, cfg.to_dict()), nprocs=world_size, join=True)
+        mp.spawn(_train_worker, args=(world_size, cfg.to_dict(), debug), nprocs=world_size, join=True)
     else:
-        _train_worker(0, 1, cfg.to_dict())
+        _train_worker(0, 1, cfg.to_dict(), debug)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -332,6 +371,11 @@ def _parse_args() -> argparse.Namespace:
         "--print-config",
         action="store_true",
         help="Print the default configuration and exit",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose debugging output for model setup and training",
     )
     return parser.parse_args()
 
@@ -347,7 +391,11 @@ def main() -> None:
         print(cfg.summary())
         return
 
-    launch_pretraining(cfg)
+    if args.debug:
+        print("[DEBUG] Loaded configuration:")
+        print(cfg.summary())
+
+    launch_pretraining(cfg, debug=args.debug)
 
 
 if __name__ == "__main__":
