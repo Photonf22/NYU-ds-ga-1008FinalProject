@@ -3,7 +3,7 @@
     "dataset_root": "./data",
     "dataset_name": "tsbpp___fall2025_deeplearning",
     "image_size": 224,
-    "train_batch_size": 128,
+    "train_batch_size": 256,
     "eval_batch_size": 512,
     "num_workers": 16,
     "pin_memory": true,
@@ -27,7 +27,7 @@
   },
   "model": {
     "img_size": 224,
-    "patch_size": 4,
+    "patch_size": 16,
     "in_chans": 3,
     "embed_dim": 192,
     "enc_depth": 6,
@@ -51,7 +51,7 @@
     "momentum_teacher_final": 1.0
   },
   "hardware": {
-    "world_size": 2,
+    "world_size": 4,
     "seed": 42,
     "mixed_precision": true,
     "compile_model": false,
