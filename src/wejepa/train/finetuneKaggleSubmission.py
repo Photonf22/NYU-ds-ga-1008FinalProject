@@ -1,20 +1,45 @@
 """Utility helpers for fine-tuning a pretrained WE-JEPA encoder."""
 from __future__ import annotations
 
+from tqdm import tqdm
 import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Tuple
 from PIL import Image
 import torch
+import pandas as pd
+import numpy as np
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, DataLoader
 import torchvision
+import sys
+import os
+from torchvision import transforms 
+from PIL import Image
+from pathlib import Path
+from wejepa.backbones import adapt_config_for_backbone, available_backbones
 
-from ..config import IJepaConfig, default_config
-from ..datasets.cifar import build_eval_transform, build_train_transform
-from ..model import IJEPA_base
+SCRIPT_DIR = "~/code/dl_project1_copy_a_copy/NYU-ds-ga-1008FinalProject/src/wejepa"
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(os.path.dirname(SCRIPT_DIR))
+#sys.path.append(str(Path(file).parent.parent))
+from config import IJepaConfig, default_config
+#from ..datasets.cifar import build_eval_transform, build_train_transform
+from model import IJEPA_base
+transform_to_tensor = transforms.ToTensor()
 
+def collate_fn(batch):
+    """Custom collate function to handle PIL images"""
+    if len(batch[0]) == 3:  # train/val (image, label, filename)
+        images = [item[0] for item in batch]
+        labels = [item[1] for item in batch]
+        filenames = [item[2] for item in batch]
+        return images, labels, filenames
+    else:  # test (image, filename)
+        images = [item[0] for item in batch]
+        filenames = [item[1] for item in batch]
+        return images, filenames
 class ImageDataset(Dataset):
     """Simple dataset for loading images"""
 
@@ -32,26 +57,27 @@ class ImageDataset(Dataset):
         self.resolution = resolution
     def __len__(self):
         return len(self.image_list)
-                                                                                                                     
+
     def __getitem__(self, idx):
         img_name = self.image_list[idx]
         img_path = self.image_dir / img_name
-                                                                                                                                                                                
+
         # Load and resize image
         image = Image.open(img_path).convert('RGB')
         image = image.resize((self.resolution, self.resolution), Image.BILINEAR)
-                                                                                                                                                                                                                
-                                                                                                                                                                             if self.labels is not None:
+
+        if self.labels is not None:
             return image, self.labels[idx], img_name
-                                                                                                                                                                             return image, img_name
+        return image, img_name
 
 @dataclass
 class FinetuneConfig:
     """Configuration for running the linear-probe fine-tuning loop."""
 
     ijepa: IJepaConfig = field(default_factory=default_config)
+    config: Optional[str] = None
     batch_size: int = 128
-    epochs: int = 5
+    epochs: int = 6
     learning_rate: float = 1e-3
     weight_decay: float = 0.0
     num_classes: int = 100
@@ -84,22 +110,22 @@ class LinearProbe(nn.Module):
         # cls token features
         cls_features = outputs.last_hidden_state[:,0]
         return cls_features.cpu().numpy()
-     
+
     def extract_features(self, image):
         # Process image
         inputs = self.processor(images=image, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
-                                    
+
         # Extract features
         # Please keep the model backbone frozen for the competition!
         with torch.no_grad():
             outputs = self.model(**inputs)
-                                                                                    
+
         # Use CLS token features
         cls_features = outputs.last_hidden_state[:, 0]  # Shape: (1, feature_dim)
-                                                                                                            
+
         # Alternative: use mean of patch features
-                                 
+
         # patch_features = outputs.last_hidden_state[:, 1:]
         # features = patch_features.mean(dim=1)
         return cls_features.cpu().numpy()[0]
@@ -141,6 +167,7 @@ def create_kaggle_dataloader(cfg: IJepaConfig, ImgDataSet: ImageDataset,train: b
                       pin_memory=cfg.data.pin_memory, 
                       drop_last=train,
                       persistent_workers=cfg.data.persistent_workers and cfg.data.num_workers > 0,
+                      collate_fn=collate_fn
                       )
         if cfg.data.num_workers > 0:
             kwargs["prefetch_factor"] = cfg.data.prefetch_factor
@@ -172,6 +199,7 @@ def load_backbone_from_checkpoint(checkpoint_path: str, cfg: Optional[IJepaConfi
         module.predictor.load_state_dict(checkpoint["predictor"])
     module.set_mode("test")
     module.eval()
+    #print("Loaded model: ", module)
     return module
 
 
@@ -186,9 +214,22 @@ def _train_one_epoch(
     total_loss = 0.0
     total_correct = 0
     total = 0
-    for images, labels in loader:
-        images = images.to(device)
-        labels = labels.to(device)
+    split_name='train'
+    
+    #for images, labels, filename in loader:
+    for batch in tqdm(loader, desc=f"{split_name} features"):
+        images, labels, filenames = batch
+        #[print(label) for label in labels]
+        
+        #exit()
+        tensor_list_img = [transform_to_tensor(img) for img in images]
+        #tensor_list_label = [transform_to_tensor(label) for label in labels]
+        #print(tensor_list_img)
+        #exit()
+        labels = torch.tensor(labels).to(device)
+        images = torch.stack(tensor_list_img).to(device)
+        
+        #labels = torch.stack(tensor_list_label)
         logits = model(images)
         loss = criterion(logits, labels)
         optimizer.zero_grad(set_to_none=True)
@@ -216,12 +257,21 @@ def _evaluate(model: LinearProbe, loader: DataLoader, device: torch.device) -> f
     return total_correct / max(1, total)
 
 
-def train_linear_probe(ft_cfg: Optional[FinetuneConfig] = None, ImgDataSetTrain: Optional[ImageDataset] = None, ImgDataSetTest: Optional[ImageDataset] = None) -> LinearProbe:
+def train_linear_probe(type_of_backbone, ft_cfg: Optional[FinetuneConfig] = None, ImgDataSetTrain: Optional[ImageDataset] = None, ImgDataSetTest: Optional[ImageDataset] = None) -> LinearProbe:
     ft_cfg = ft_cfg or FinetuneConfig()
-    cfg = ft_cfg.ijepa
+    #cfg = ft_cfg.ijepa
+    cfg = adapt_config_for_backbone(default_config(), type_of_backbone)
+    #if ft_cfg.config:
+    #    cfg_dict = json.loads(Path(args.config).read_text())
+    #    cfg = IJepaConfig.from_dict(cfg_dict)
+    #else: 
+    #    cfg = default_config()
+
+    print("Configuration: ", cfg)
     if ft_cfg.checkpoint_path is None:
         raise ValueError("A pretrained checkpoint path must be provided for fine-tuning.")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("loading backbone from checkpoint!")
     backbone = load_backbone_from_checkpoint(ft_cfg.checkpoint_path, cfg)
     backbone.to(device)
     model = LinearProbe(backbone, ft_cfg.num_classes).to(device)
@@ -230,9 +280,9 @@ def train_linear_probe(ft_cfg: Optional[FinetuneConfig] = None, ImgDataSetTrain:
         lr=ft_cfg.learning_rate,
         weight_decay=ft_cfg.weight_decay,
     )
-    train_loader = create_kaggle_dataloaders(cfg, ImgDataSetTrain, train=True, batch_size=ft_cfg.batch_size)
+    train_loader = create_kaggle_dataloader(cfg, ImgDataSetTrain, train=True, batch_size=ft_cfg.batch_size)
     if ImgDataSetTest != None:
-        eval_loader = create_kaggle_dataloaders(cfg, ImgDataSetTest, train=False, batch_size=ft_cfg.batch_size)
+        eval_loader = create_kaggle_dataloader(cfg, ImgDataSetTest, train=False, batch_size=ft_cfg.batch_size)
     #train_loader = create_finetune_dataloader(cfg, train=True, batch_size=ft_cfg.batch_size)
     #eval_loader = create_finetune_dataloader(
     #    cfg, train=False, batch_size=ft_cfg.batch_size
@@ -250,11 +300,12 @@ def train_linear_probe(ft_cfg: Optional[FinetuneConfig] = None, ImgDataSetTrain:
                 f"[Linear probe] Epoch {epoch + 1}/{ft_cfg.epochs} "
                 f"| loss={loss:.4f} | train_acc={acc:.3f}"
             )
-        return model
+    return model
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fine-tune a pretrained WE-JEPA encoder")
+    parser.add_argument("--data_dir",type=str,required=True)
     parser.add_argument("--checkpoint", type=str, required=True, help="Path to a saved checkpoint")
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=128)
@@ -266,51 +317,59 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--resolution", type=int, default=96)
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--config", type=str)
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
+    print("Fine Tune Create")
     ft_cfg = FinetuneConfig(
+        #data_dir=args.data_dir,
         epochs=args.epochs,
         batch_size=args.batch_size,
         learning_rate=args.lr,
         weight_decay=args.weight_decay,
         num_classes=args.num_classes,
-        checkpoint_path=args.checkpoint,
+        checkpoint_path=args.checkpoint
     )
+    
+
     data_dir = Path(args.data_dir)
     # Load CSV files
     print("\nLoading dataset metadata...")
     train_df = pd.read_csv(data_dir / 'train_labels.csv')
     val_df = pd.read_csv(data_dir / 'val_labels.csv')
     test_df = pd.read_csv(data_dir / 'test_images.csv')
-                            
+
     print(f"  Train: {len(train_df)} images")
     print(f"  Val: {len(val_df)} images")
     print(f"  Test: {len(test_df)} images")
     print(f"  Classes: {train_df['class_id'].nunique()}")
-                                                
+
     train_dataset = ImageDataset(
             data_dir / 'train',
             train_df['filename'].tolist(),
             train_df['class_id'].tolist(),
             resolution=args.resolution
     )
-         
+    print("Training dataset setup complete")
+
     #val_dataset = ImageDataset(
     #        data_dir / 'val',
     #        val_df['filename'].tolist(),
     #        val_df['class_id'].tolist(),
     #        resolution=args.resolution
     #)
-    train_linear_probe(ft_cfg, train_dataset)
+    #  ['convnext_small', 'convnext_tiny', 'swin_s', 'swin_t', 'vit_b_16']
+    train_linear_probe("convnext_small",ft_cfg, train_dataset)
 
 
 __all__ = [
     "FinetuneConfig",
     "LinearProbe",
-    "create_finetune_dataloader",
+    #"create_finetune_dataloader",
+    "create_kaggle_dataloader",
     "load_backbone_from_checkpoint",
     "train_linear_probe",
 ]
