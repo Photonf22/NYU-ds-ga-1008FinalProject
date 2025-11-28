@@ -340,7 +340,7 @@ def main() -> None:
         num_classes=args.num_classes,
         checkpoint_path=args.checkpoint,
         config=args.config,
-        type_of_backbone=args.type_of_backbone,
+        type_of_backbone=args.type_of_backbone
     )
     
 
