@@ -4,7 +4,7 @@
     "dataset_name": "imagefolder",
     "dataset_dir": "tsbpp_fall2025_deeplearning",
     "image_size": 224,
-    "train_batch_size": 256,
+    "train_batch_size": 512,
     "eval_batch_size": 512,
     "num_workers": 4,
     "pin_memory": true,
@@ -79,7 +79,7 @@
   },
   "hardware": {
     "seed": 42,
-    "world_size": 4,
+    "world_size": 3,
     "mixed_precision": true,
     "compile_model": false,
     "log_every": 50,
