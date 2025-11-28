@@ -1,10 +1,5 @@
-"""Data download helpers and CLI entrypoints.
-
-This module bundles the dataset bootstrap logic used by ``wejepa`` so that new
-machines can be primed with the expected CIFAR-100 layout before running the
-pretraining scripts.  It intentionally avoids any project-specific runtime
-state (like accelerators or distributed processes) which allows the helper to
-run from bare Python environments.
+"""
+Data download helpers and CLI entrypoints.
 """
 from __future__ import annotations
 
@@ -19,9 +14,11 @@ import huggingface_hub
 import datasets
 import urllib.request
 import tarfile
+import shutil
 
 # For CUB-200 postprocessing
 from .cub200 import CUB200Dataset
+from .standard import ensure_standard_metadata
 
 _VALID_SPLITS = {"train", "test"}
 
@@ -40,7 +37,6 @@ def download(
     splits: Iterable[str] = ("train", "test"),
     debug: bool = False,
 ) -> Mapping[str, Path]:
-    """Download datasets splits into ``dataset_root`` if needed.
 
     Parameters
     ----------
@@ -52,30 +48,26 @@ def download(
     Returns
     -------
     Mapping[str, Path]
-        Dictionary from split name to the directory that now contains the
-        extracted data.
     """
 
     root = _normalize_root(dataset_root)
+    downloads_dir = root / "downloads"
+    downloads_dir.mkdir(parents=True, exist_ok=True)
     if debug:
         print(
-            f"[DEBUG] Preparing download for dataset={dataset_name} splits={tuple(splits)} root={root}"
+            f"[DEBUG] Preparing download for dataset={dataset_name} splits={tuple(splits)} root={root} downloads_dir={downloads_dir}"
         )
     downloaded: MutableMapping[str, Path] = {}
     def is_hf_format(directory: Path):
-        # Check for common Hugging Face dataset file types or image folders
         for ext in [".csv", ".json", ".parquet"]:
             if any(directory.glob(f"*{ext}")):
                 return True
-        # Check for at least one subdirectory (e.g., images)
         if any(p.is_dir() for p in directory.iterdir()):
             return True
         return False
-    # normalize dataset name for matching common variants
     dataset_key = str(dataset_name).lower().replace("_", "").replace("-", "")
 
     def extract_archives(directory: Path):
-        # Recursively extract all zip, tar, tar.gz files in directory and subdirectories
         zip_files = list(directory.rglob("*.zip"))
         tar_files = list(directory.rglob("*.tar")) + list(directory.rglob("*.tar.gz"))
         for path in tqdm.tqdm(zip_files, desc="Extracting ZIP files"):
@@ -93,47 +85,56 @@ def download(
             except Exception as e:
                 print(f"Failed to extract {path}: {e}")
 
-    # TODO: make a more generic download process using different types (i.e., hf vs torchvision vs custom)
+    # Use a subdirectory for each dataset
+    dataset_subdir = dataset_name.replace("/", "___").replace("-", "_").lower()
+    processed_root = root / dataset_subdir
+
+    primary_root: Path = processed_root
     for split in splits:
         if dataset_name == "cifar100":
             if split not in _VALID_SPLITS:
                 raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
             train_flag = split == "train"
             if debug:
-                print(f"[DEBUG] Requesting CIFAR100 split='{split}' at {root}")
-            CIFAR100(root=str(root), train=train_flag, download=True)
+                print(f"[DEBUG] Requesting CIFAR100 split='{split}' at {downloads_dir}")
+            CIFAR100(root=str(downloads_dir), train=train_flag, download=True)
+            primary_root = processed_root
+            downloaded[split] = processed_root
         elif dataset_key.startswith("cub200") or dataset_key.startswith("cub"):
-            # support variants like 'cub200', 'cub_200_2011', 'CUB-200'
             url = "https://data.caltech.edu/records/65de6-vp158/files/CUB_200_2011.tgz"
-            tar_path = root / "CUB_200_2011.tgz"
+            tar_path = downloads_dir / "CUB_200_2011.tgz"
 
             if not tar_path.exists():
                 print(f"Downloading CUB-200-2011 from {url}...")
                 urllib.request.urlretrieve(url, tar_path)
                 print("Download complete!")
 
-            # Extract
-            extract_dir = root / "CUB_200_2011"
+            extract_dir = downloads_dir / "CUB_200_2011"
 
             if not extract_dir.exists():
                 print("Extracting CUB-200-2011 dataset...")
                 with tarfile.open(tar_path, 'r:gz') as tar:
-                    tar.extractall(root)
+                    tar.extractall(downloads_dir)
                 print("Extraction complete!")
 
-            print("Generating CUB-200 train/val/test splits")
-            CUB200Dataset._try_generate_cub200_metadata(root)
+            target_cub_dir = processed_root / "CUB_200_2011"
+            if not target_cub_dir.exists():
+                shutil.copytree(extract_dir, target_cub_dir)
 
-            downloaded[split] = root
+            print("Generating CUB-200 train/val/test splits")
+            CUB200Dataset._try_generate_cub200_metadata(processed_root)
+
+            downloaded[split] = processed_root
+            primary_root = processed_root
             continue
         else:
             if debug:
                 print(
-                    f"[DEBUG] Loading HuggingFace dataset '{dataset_name}' split='{split}' cache_dir={root}"
+                    f"[DEBUG] Loading HuggingFace dataset '{dataset_name}' split='{split}' cache_dir={downloads_dir}"
                 )
-            datasets.load_dataset(dataset_name, split=split, cache_dir=str(root))
+            datasets.load_dataset(dataset_name, split=split, cache_dir=str(downloads_dir))
             if snapshot_download:
-                target_dir = root / f"{dataset_name.replace('/', '_')}"
+                target_dir = downloads_dir / f"{dataset_name.replace('/', '___')}"
                 target_dir.mkdir(parents=True, exist_ok=True)
                 huggingface_hub.snapshot_download(
                     repo_id=dataset_name,
@@ -148,11 +149,26 @@ def download(
                     print(
                         f"[DEBUG] Downloaded dataset to {target_dir}, extracting archives if any."
                     )
-                # Always try to extract archives after download
                 extract_archives(target_dir)
-                downloaded[split] = target_dir
+
+                split_dirs = ["train", "val", "test"]
+                has_split = any((target_dir / s).exists() for s in split_dirs)
+                
+                if target_dir != processed_root:
+                    if processed_root.exists():
+                        shutil.rmtree(processed_root)
+                    shutil.move(str(target_dir), str(processed_root))
+                
+                downloaded[split] = processed_root
+                primary_root = processed_root
             else:
-                downloaded[split] = root
+                downloaded[split] = processed_root
+                primary_root = processed_root
+    try:
+        ensure_standard_metadata(primary_root, dataset_name)
+    except FileNotFoundError as exc:
+        if debug:
+            print(f"[DEBUG] Skipping metadata generation: {exc}")
     return downloaded
 
 def _parse_args() -> argparse.Namespace:
@@ -196,7 +212,6 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Command-line entrypoint used via ``python -m wejepa.data.download``."""
 
     args = _parse_args()
     downloads = download(
