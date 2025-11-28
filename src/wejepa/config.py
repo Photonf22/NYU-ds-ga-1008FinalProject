@@ -35,6 +35,7 @@ class DataConfig:
     normalization_std: Tuple[float, float, float] = (0.2675, 0.2565, 0.2761)
     use_fake_data: bool = False
     fake_data_size: int = 512
+    val_split: float = 0.1
     # For custom list-based datasets
     image_dir: Optional[str] = None
     image_list: Optional[str] = None
@@ -153,7 +154,7 @@ def hf224_config() -> IJepaConfig:
 
     cfg = default_config()
     cfg.data.dataset_name = "imagefolder"
-    cfg.data.dataset_dir = "tsbpp_fall2025_deeplearning"
+    cfg.data.dataset_dir = "tsbpp___fall2025_deeplearning"
     cfg.data.image_size = 224
     cfg.model.img_size = 224
     cfg.model.patch_size = 16
