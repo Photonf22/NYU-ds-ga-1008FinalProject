@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from tqdm import tqdm
+import json
 import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -83,6 +84,7 @@ class FinetuneConfig:
     num_classes: int = 100
     num_workers: int = 4
     checkpoint_path: Optional[str] = None
+    type_of_backbone: Optional[str] = None
 
 
 class LinearProbe(nn.Module):
@@ -257,15 +259,19 @@ def _evaluate(model: LinearProbe, loader: DataLoader, device: torch.device) -> f
     return total_correct / max(1, total)
 
 
-def train_linear_probe(type_of_backbone, ft_cfg: Optional[FinetuneConfig] = None, ImgDataSetTrain: Optional[ImageDataset] = None, ImgDataSetTest: Optional[ImageDataset] = None) -> LinearProbe:
+def train_linear_probe(ft_cfg: Optional[FinetuneConfig] = None, ImgDataSetTrain: Optional[ImageDataset] = None, ImgDataSetTest: Optional[ImageDataset] = None) -> LinearProbe:
     ft_cfg = ft_cfg or FinetuneConfig()
+    
     #cfg = ft_cfg.ijepa
-    cfg = adapt_config_for_backbone(default_config(), type_of_backbone)
-    #if ft_cfg.config:
-    #    cfg_dict = json.loads(Path(args.config).read_text())
-    #    cfg = IJepaConfig.from_dict(cfg_dict)
-    #else: 
-    #    cfg = default_config()
+    #cfg = adapt_config_for_backbone(default_config(), type_of_backbone)
+    
+    if ft_cfg.config:
+        print("adding ft_cfg config to loaded model")
+        cfg_dict = json.loads(Path(ft_cfg.config).read_text())
+        cfg_ijepa = IJepaConfig.from_dict(cfg_dict)
+        cfg = adapt_config_for_backbone(cfg_ijepa, ft_cfg.type_of_backbone)
+    else: 
+        cfg = adapt_config_for_backbone(default_config(), ft_cfg.type_of_backbone)
 
     print("Configuration: ", cfg)
     if ft_cfg.checkpoint_path is None:
@@ -318,6 +324,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--config", type=str)
+    parser.add_argument("--type_of_backbone",type=str,required=True)
     return parser.parse_args()
 
 
@@ -331,7 +338,9 @@ def main() -> None:
         learning_rate=args.lr,
         weight_decay=args.weight_decay,
         num_classes=args.num_classes,
-        checkpoint_path=args.checkpoint
+        checkpoint_path=args.checkpoint,
+        config=args.config,
+        type_of_backbone=args.type_of_backbone,
     )
     
 
@@ -362,7 +371,7 @@ def main() -> None:
     #        resolution=args.resolution
     #)
     #  ['convnext_small', 'convnext_tiny', 'swin_s', 'swin_t', 'vit_b_16']
-    train_linear_probe("convnext_small",ft_cfg, train_dataset)
+    train_linear_probe(ft_cfg, train_dataset)
 
 
 __all__ = [
