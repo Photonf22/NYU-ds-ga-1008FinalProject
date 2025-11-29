@@ -1,6 +1,4 @@
-"""
-Fine-tuning utilities
-"""
+"""Fine-tuning utilities for WE-JEPA backbones."""
 
 from __future__ import annotations
 
@@ -8,7 +6,6 @@ import argparse
 import json
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import List, Optional, Tuple
 
 import torch
@@ -16,18 +13,16 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 import torchvision
+from ..datasets.image_dataset import ImageDataset
 
 from ..config import IJepaConfig, default_config
-from ..datasets.standard import (
-    StandardImageDataset,
-    build_standard_eval_transform as build_eval_transform,
-    build_standard_train_transform as build_train_transform,
-)
+from ..datasets.cifar import build_eval_transform, build_train_transform
 from ..model import IJEPA_base
 
 
 @dataclass
 class FinetuneConfig:
+    """Configuration for running the linear-probe fine-tuning loop."""
 
     ijepa: IJepaConfig = field(default_factory=default_config)
     batch_size: int = 128
@@ -70,7 +65,12 @@ class LinearProbe(nn.Module):
 
 def _build_dataset(cfg: IJepaConfig, train: bool, debug: bool = False):
     name = getattr(cfg.data, 'dataset_name', 'cifar100').lower()
-    transform = build_train_transform(cfg) if train else build_eval_transform(cfg)
+    # Use CUB-200-specific transforms if needed
+    if name in ["cub200", "cub-200", "cub", "cub-200-2011"]:
+        from ..datasets.cub200 import build_cub_train_transform, build_cub_eval_transform
+        transform = build_cub_train_transform(cfg) if train else build_cub_eval_transform(cfg)
+    else:
+        transform = build_train_transform(cfg) if train else build_eval_transform(cfg)
     if cfg.data.use_fake_data:
         if debug:
             print(f"[DEBUG] Using FakeData with size={cfg.data.fake_data_size} for {'train' if train else 'eval'}")
@@ -80,24 +80,53 @@ def _build_dataset(cfg: IJepaConfig, train: bool, debug: bool = False):
             num_classes=max(cfg.data.fake_data_size, cfg.data.eval_batch_size),
             transform=transform,
         )
-    dataset_root = Path(cfg.data.dataset_root)
-    if getattr(cfg.data, "dataset_dir", None):
-        dataset_root = dataset_root / cfg.data.dataset_dir
-    split = "train" if train else "val"
-    if debug:
-        print(
-            f"[DEBUG] Loading StandardImageDataset name={name} split={split} root={dataset_root}"
+    if name in ["cifar100", "cifar-100"]:
+        if debug:
+            print(f"[DEBUG] Loading CIFAR100 train={train} root={cfg.data.dataset_root} transform={transform}")
+        return torchvision.datasets.CIFAR100(
+            root=cfg.data.dataset_root,
+            train=train,
+            transform=transform,
+            download=train,
         )
-    return StandardImageDataset(
-        dataset_root,
-        split,
-        dataset_name=name,
-        transform=transform,
-        return_labels=True,
-        fake_size=cfg.data.fake_data_size if cfg.data.use_fake_data else None,
-        image_size=cfg.data.image_size,
-        val_ratio=getattr(cfg.data, "val_split", 0.1),
-    )
+    elif name in ["cub200", "cub-200", "cub", "cub-200-2011"]:
+        # Use CSV-based CUB200Dataset, with CSVs in dataset_root
+        from ..datasets.cub200 import CUB200Dataset
+        split = "train" if train else "val"  # Use val for eval/validation
+        if debug:
+            print(f"[DEBUG] Loading CUB200Dataset from {cfg.data.dataset_root} split={split}")
+        return CUB200Dataset(
+            root=cfg.data.dataset_root,
+            split=split,
+            transform=transform,
+            return_labels=True,
+        )
+    elif name in ["imagefolder", "folder"]:
+        folder_dir = getattr(cfg.data, 'dataset_dir', None)
+        if folder_dir is None:
+            folder_dir = os.path.join(cfg.data.dataset_root, "images")
+        if debug:
+            print(f"[DEBUG] Loading ImageFolder from {folder_dir} train={train} transform={transform}")
+        return torchvision.datasets.ImageFolder(root=folder_dir, transform=transform)
+    elif name in ["imagedataset", "customlist", "listdataset"]:
+        # Use ImageDataset: expects image_list and (optionally) labels in config
+        image_dir = getattr(cfg.data, 'image_dir', None)
+        image_list_path = getattr(cfg.data, 'image_list', None)
+        labels_path = getattr(cfg.data, 'labels', None)
+        resolution = getattr(cfg.data, 'image_size', 224)
+        if image_dir is None or image_list_path is None:
+            raise ValueError("For ImageDataset, 'image_dir' and 'image_list' must be specified in config.data")
+        with open(image_list_path, 'r') as f:
+            image_list = [line.strip() for line in f if line.strip()]
+        labels = None
+        if labels_path is not None:
+            with open(labels_path, 'r') as f:
+                labels = [int(line.strip()) for line in f if line.strip()]
+        if debug:
+            print(f"[DEBUG] Loading ImageDataset from {image_dir} with {len(image_list)} images, labels={labels is not None}, resolution={resolution}")
+        return ImageDataset(image_dir, image_list, labels=labels, resolution=resolution)
+    else:
+        raise ValueError(f"Unknown dataset_name: {name}")
 
 
 
@@ -278,6 +307,7 @@ def train_linear_probe(ft_cfg: Optional[FinetuneConfig] = None) -> LinearProbe:
 
 
 def compare_pretrained_vs_scratch(ft_cfg: FinetuneConfig) -> FinetuneReport:
+    """Train probes on a pretrained backbone vs. a fresh one for quick validation."""
 
     cfg = ft_cfg.ijepa
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
