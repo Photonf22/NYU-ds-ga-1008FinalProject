@@ -143,7 +143,7 @@ class IJEPA_base(nn.Module):
         layer_dropout: float = 0.0,
         backbone: str = None,
         pretrained: bool = False,
-        use_jepa_pos_with_backbone: bool = False,
+        use_jepa_pos_with_backbone: bool = True,
         debug: bool = False,
     ) -> None:
         super().__init__()
@@ -155,9 +155,9 @@ class IJEPA_base(nn.Module):
         self.patch_embed = None
         self.backbone_feature: Optional[BackboneFeatureExtractor] = None
         self._debug_logged = False
-
         self.num_classes = None
         self.freeze = None
+        self.use_jepa_pos_with_backbone = use_jepa_pos_with_backbone
 
         if backbone is not None:
             spec = get_backbone_spec(backbone)
@@ -167,6 +167,7 @@ class IJEPA_base(nn.Module):
                 pretrained=pretrained,
                 num_classes=None,
                 freeze_backbone=self.freeze,
+                use_jepa_pos_with_backbone=use_jepa_pos_with_backbone,
             )
             self.backbone_feature = BackboneFeatureExtractor(self.backbone.model, spec)
             embed_dim = self.backbone.hidden_dim
@@ -382,6 +383,9 @@ class IJEPA_base(nn.Module):
         if self.pos_embedding is not None:
             self._maybe_resize_positional_embedding(tokens)
             tokens = tokens + self.pos_embedding              # B x N x D
+        
+        if self.backbone is None or self.use_jepa_pos_with_backbone:
+            tokens = tokens + self.pos_embedding
 
         tokens = self.post_emb_norm(tokens)
 

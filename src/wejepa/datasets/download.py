@@ -14,7 +14,7 @@ import tqdm
 from pathlib import Path
 from typing import Iterable, Mapping, MutableMapping, Optional
 
-from torchvision.datasets import CIFAR100
+from torchvision.datasets import CIFAR100, VOCDetection, Caltech101, Caltech256, Flowers102, Flickr30k, CocoDetection, CocoCaptions, ImageNet
 import huggingface_hub
 import datasets
 import urllib.request
@@ -102,6 +102,62 @@ def download(
             if debug:
                 print(f"[DEBUG] Requesting CIFAR100 split='{split}' at {root}")
             CIFAR100(root=str(root), train=train_flag, download=True)
+        elif dataset_name == "voc2007":
+            if split not in _VALID_SPLITS:
+                raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
+            year = "2007"
+            image_set = "trainval" if split == "train" else "test"
+            if debug:
+                print(f"[DEBUG] Requesting VOCDetection split='{split}' at {root}")
+            VOCDetection(root=str(root), year=year, image_set=image_set, download=True)
+        elif dataset_name == "caltech101":
+            if split not in _VALID_SPLITS:
+                raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
+            if debug:
+                print(f"[DEBUG] Requesting Caltech101 split='{split}' at {root}")
+            Caltech101(root=str(root), download=True)
+        elif dataset_name == "caltech256":
+            if split not in _VALID_SPLITS:
+                raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
+            if debug:
+                print(f"[DEBUG] Requesting Caltech256 split='{split}' at {root}")
+            Caltech256(root=str(root), download=True)
+        elif dataset_name == "flowers102":
+            if split not in _VALID_SPLITS:
+                raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
+            if debug:
+                print(f"[DEBUG] Requesting Flowers102 split='{split}' at {root}")
+            Flowers102(root=str(root), download=True)
+        # elif dataset_name == "flickr30k":
+        #     if split not in _VALID_SPLITS:
+        #         raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
+        #     if debug:
+        #         print(f"[DEBUG] Requesting Flickr30k split='{split}' at {root}")
+        #     ann_file = str(root / "flickr30k" / "results.csv")
+        #     Flickr30k(root=str(root), ann_file=ann_file)
+        elif dataset_name == "coco_detection":
+            if split not in _VALID_SPLITS:
+                raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
+            year = "2017"
+            image_set = "train" if split == "train" else "val"
+            if debug:
+                print(f"[DEBUG] Requesting CocoDetection split='{split}' at {root}")
+            CocoDetection(root=str(root), year=year, image_set=image_set, download=True)
+        elif dataset_name == "coco_captions":
+            if split not in _VALID_SPLITS:
+                raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
+            year = "2017"
+            image_set = "train" if split == "train" else "val"
+            if debug:
+                print(f"[DEBUG] Requesting CocoCaptions split='{split}' at {root}")
+            CocoCaptions(root=str(root), year=year, image_set=image_set, download=True)
+        elif dataset_name == "imagenet":
+            if split not in _VALID_SPLITS:
+                raise ValueError(f"Unknown split '{split}'. Expected one of {_VALID_SPLITS}.")
+            is_train = split == "train"
+            if debug:
+                print(f"[DEBUG] Requesting ImageNet split='{split}' at {root}")
+            ImageNet(root=str(root), split="train" if is_train else "val", download=True)
         elif dataset_key.startswith("cub200") or dataset_key.startswith("cub"):
             # support variants like 'cub200', 'cub_200_2011', 'CUB-200'
             url = "https://data.caltech.edu/records/65de6-vp158/files/CUB_200_2011.tgz"

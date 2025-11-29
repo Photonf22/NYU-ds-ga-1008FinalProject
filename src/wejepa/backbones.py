@@ -169,6 +169,7 @@ def build_backbone(
     num_classes: Optional[int] = None,
     pretrained: bool = True,
     freeze_backbone: bool = False,
+    use_jepa_pos_with_backbone: bool = True,
     **kwargs,
 ) -> Tuple[nn.Module, int]:
     """Instantiate a torchvision backbone and optionally replace the classifier head.
@@ -205,7 +206,7 @@ def build_backbone(
         for param in model.parameters():
             if id(param) not in head_param_ids:
                 param.requires_grad = False
-    wrapped = _TokenizingBackbone(model, spec)
+    wrapped = _TokenizingBackbone(model, spec, use_jepa_pos_with_backbone=use_jepa_pos_with_backbone)
     return wrapped, feature_dim
 
 
@@ -236,10 +237,13 @@ def resolve_preprocess_transforms(
 class _TokenizingBackbone(nn.Module):
     """Wrap torchvision classification models to emit patch tokens."""
 
-    def __init__(self, model: nn.Module, spec: BackboneSpec) -> None:
+    def __init__(self, model: nn.Module, 
+                 spec: BackboneSpec, 
+                 use_jepa_pos_with_backbone: bool = True) -> None:
         super().__init__()
         self.model = model
         self.spec = spec
+        self.use_jepa_pos_with_backbone = use_jepa_pos_with_backbone
         self.image_size = getattr(model, "image_size", spec.default_image_size)
         self.patch_size = getattr(model, "patch_size", spec.default_patch_size)
         self.hidden_dim = getattr(model, "hidden_dim", None)
@@ -311,6 +315,8 @@ class _TokenizingBackbone(nn.Module):
         n = processed.shape[1]
         batch_class_token = self.model.class_token.expand(processed.shape[0], -1, -1)  # type: ignore[attr-defined]
         tokens = torch.cat((batch_class_token, processed), dim=1)
+        if self.use_jepa_pos_with_backbone:
+            return tokens[:, 1:, :]
         tokens = tokens + self.model.encoder.pos_embedding[:, : n + 1, :]  # type: ignore[attr-defined]
         tokens = self.model.encoder.dropout(tokens)  # type: ignore[attr-defined]
         tokens = self.model.encoder(tokens)  # type: ignore[attr-defined]

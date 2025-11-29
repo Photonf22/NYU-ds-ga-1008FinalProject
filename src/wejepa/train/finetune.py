@@ -191,6 +191,7 @@ def load_backbone_from_checkpoint(
         layer_dropout=cfg.model.layer_dropout,
         backbone=cfg.model.classification_backbone,
         pretrained=cfg.model.classification_pretrained,
+        use_jepa_pos_with_backbone=getattr(cfg.model, 'use_jepa_pos_with_backbone', True),
         debug=debug,
     )
     if debug:

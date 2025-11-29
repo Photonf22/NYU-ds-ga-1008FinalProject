@@ -23,7 +23,7 @@
     "classification_backbone": "vit_b_16",
     "classification_num_classes": 200,
     "classification_pretrained": false,
-    "model_bypass": false,
+    "model_bypass": true,
     "use_jepa_pos_with_backbone": true
   },
   "optimizer": {

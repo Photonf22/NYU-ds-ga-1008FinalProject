@@ -59,12 +59,13 @@ class IJEPAHFDataset(Dataset):
                 img = Image.open(io.BytesIO(img["bytes"]))
             else:
                 raise TypeError(f"Unknown image dict format: {img}")
+        img = img.convert("RGB")
         img = self.transform(img)
         return img
 
 def build_train_transform(cfg: IJepaConfig) -> T.Compose:
     dcfg = cfg.data
-    transforms = [T.Resize(dcfg.image_size)]
+    transforms = [T.Resize((dcfg.image_size, dcfg.image_size))]
     transforms.extend([
         T.ToTensor(),
         T.Normalize(dcfg.normalization_mean, dcfg.normalization_std),
