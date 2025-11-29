@@ -22,7 +22,8 @@
     "layer_dropout": 0.0,
     "classification_backbone": "vit_b_16",
     "classification_num_classes": 200,
-    "classification_pretrained": false
+    "classification_pretrained": true,
+    "model_bypass": true
   },
   "optimizer": {
     "epochs": 5,

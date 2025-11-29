@@ -16,6 +16,7 @@ from .backbones import (
     choose_num_heads,
     get_backbone_spec,
     resolve_preprocess_transforms,
+    BackboneFeatureExtractor,
 )
 from .datasets import IJEPACIFARDataset, IJEPAHFDataset, create_pretraining_dataloader
 from .model import IJEPA_base

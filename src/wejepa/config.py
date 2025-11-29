@@ -28,11 +28,16 @@ class DataConfig:
     persistent_workers: bool = True
     prefetch_factor: int = 2
     crop_scale: Tuple[float, float] = (0.6, 1.0)
-    color_jitter: float = 0.5
-    use_color_distortion: bool = True
-    use_horizontal_flip: bool = True
+    color_jitter: Optional[float] = None
+    use_color_distortion: Optional[bool] = False
+    use_horizontal_flip: Optional[bool] = False
     normalization_mean: Tuple[float, float, float] = (0.5071, 0.4867, 0.4408)
     normalization_std: Tuple[float, float, float] = (0.2675, 0.2565, 0.2761)
+    #normalization_mean: Optional[Tuple[float, float, float]] = None
+    #normalization_std: Optional[Tuple[float, float, float]] = None
+    #color_jitter: float = 0.5
+    #use_color_distortion: bool = True
+    #use_horizontal_flip: bool = True
     use_fake_data: bool = False
     fake_data_size: int = 512
     # For custom list-based datasets
@@ -68,6 +73,7 @@ class ModelConfig:
     classification_backbone: Optional[str] = None
     classification_num_classes: int = 100
     classification_pretrained: bool = False
+    model_bypass: bool = False
 
 
 @dataclass

@@ -329,6 +329,42 @@ class _TokenizingBackbone(nn.Module):
         self.patch_dim = (h, w)
         return tokens
 
+class BackboneFeatureExtractor(nn.Module):
+    def __init__(self, model: nn.Module, spec: BackboneSpec) -> None:
+        super().__init__()
+        self.model = model
+        self.spec = spec
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.spec.head_type == "vit":
+            processed = self.model._process_input(x)  # type: ignore[attr-defined]
+            B, N, D = processed.shape
+            # processed = processed.reshape(B, C, H * W).transpose(1, 2)  # B x N x C
+            # n = processed.shape[1]
+            #n = processed.shape[3]
+            batch_class_token = self.model.class_token.expand(
+                B, -1, -1
+                #processed.shape, -1, -1
+            )  # type: ignore[attr-defined]
+            tokens = torch.cat((batch_class_token, processed), dim=1)
+            tokens = tokens + self.model.encoder.pos_embedding[:, : N + 1, :]  # type: ignore[attr-defined]
+            tokens = self.model.encoder.dropout(tokens)  # type: ignore[attr-defined]
+            tokens = self.model.encoder(tokens)  # type: ignore[attr-defined]
+            tokens = self.model.encoder.ln(tokens)  # type: ignore[attr-defined]
+            cls = tokens[:, 0, :]  # B x D
+            return cls
+
+        if self.spec.head_type in {"convnext", "swin", "fc"}:
+            feats = self.model(x)
+            if isinstance(feats, tuple):
+                feats = feats
+            if isinstance(feats, dict):
+                feats = next(iter(feats.values()))
+            if feats.ndim == 4:
+                feats = feats.mean(dim=[4][5]) # B x C x H x W -> B x C
+            return feats
+
+        raise ValueError(f"Unsupported head type for feature extractor: {self.spec.head_type}")
 
 __all__ = [
     "adapt_config_for_backbone",
@@ -337,4 +373,5 @@ __all__ = [
     "choose_num_heads",
     "get_backbone_spec",
     "resolve_preprocess_transforms",
+    "BackboneFeatureExtractor",
 ]

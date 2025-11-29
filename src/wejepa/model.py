@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-from wejepa.backbones import build_backbone, choose_num_heads, get_backbone_spec
+from wejepa.backbones import build_backbone, choose_num_heads, get_backbone_spec, BackboneFeatureExtractor
 
 
 class PatchEmbed(nn.Module):
@@ -152,15 +152,22 @@ class IJEPA_base(nn.Module):
         self.mode = mode
         self.backbone = None
         self.patch_embed = None
+        self.backbone_feature: Optional[BackboneFeatureExtractor] = None
         self._debug_logged = False
+
+        self.num_classes = None
+        self.freeze = None
 
         if backbone is not None:
             spec = get_backbone_spec(backbone)
+            self.freeze = True
             self.backbone, self.feature_dim = build_backbone(
                 backbone,
                 pretrained=pretrained,
                 num_classes=None,
+                freeze_backbone=self.freeze,
             )
+            self.backbone_feature = BackboneFeatureExtractor(self.backbone.model, spec)
             embed_dim = self.backbone.hidden_dim
             img_size = self.backbone.image_size
             patch_size = self.backbone.patch_size
@@ -169,7 +176,9 @@ class IJEPA_base(nn.Module):
             if self.debug:
                 print(
                     f"[DEBUG] Using backbone '{backbone}' | hidden_dim={embed_dim} "
+                    f"pretrained={pretrained} freeze_backbone={self.freeze} "
                     f"image_size={img_size} patch_size={patch_size} num_heads={num_heads}"
+                    f"backbone spec={spec}"
                 )
 
             # so that everything downstream sees compatible shapes
@@ -201,6 +210,11 @@ class IJEPA_base(nn.Module):
             param.requires_grad = False
         self.predictor = Predictor(embed_dim, num_heads, pred_depth)
         self._attention_maps: List[torch.Tensor] = []
+
+    def get_backbone_features(self, x: torch.Tensor) -> torch.Tensor:
+        if self.backbone_feature is None:
+                    raise RuntimeError("No classification backbone is configured for feature extraction.")
+        return self.backbone_feature(x)
 
     def _maybe_resize_positional_embedding(self, tokens: torch.Tensor) -> None:
         """Resize positional embeddings when backbone token grids differ."""
