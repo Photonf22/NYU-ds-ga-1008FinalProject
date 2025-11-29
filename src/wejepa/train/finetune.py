@@ -55,15 +55,19 @@ class LinearProbe(nn.Module):
         self.use_backbone_bypass = (
                 cfg.model.classification_pretrained and getattr(cfg.model, "model_bypass", False)
                 )
+        device = next(self.backbone.parameters()).device
         if self.use_backbone_bypass:
             # Use supervised backbone features (CLS/pool)
-            device = next(self.backbone.parameters()).device
             sample = torch.zeros(1, 3, cfg.data.image_size, cfg.data.image_size, device=device)
             with torch.no_grad():
                 feats = self.backbone.get_backbone_features(sample)
             embed_dim = feats.shape[-1]
         else:
-            embed_dim = self.backbone.pos_embedding.shape[-1]
+            sample = torch.zeros(1, 3, cfg.data.image_size, cfg.data.image_size, device=device)
+            with torch.no_grad():
+                tokens = self.backbone(sample)
+            embed_dim = tokens.shape[-1]
+            #embed_dim = self.backbone.pos_embedding.shape[-1]
 
         self.head = nn.Linear(embed_dim, num_classes)
 

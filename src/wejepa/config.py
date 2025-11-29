@@ -74,6 +74,7 @@ class ModelConfig:
     classification_num_classes: int = 100
     classification_pretrained: bool = False
     model_bypass: bool = False
+    use_jepa_pos_with_backbone: bool = False
 
 
 @dataclass

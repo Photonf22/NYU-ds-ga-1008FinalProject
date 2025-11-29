@@ -100,6 +100,7 @@ def _build_model(cfg: IJepaConfig, debug: bool = False) -> IJEPA_base:
         layer_dropout=mcfg.layer_dropout,
         backbone=mcfg.classification_backbone,
         pretrained=mcfg.classification_pretrained,
+        use_jepa_pos_with_backbone=mcfg.use_jepa_pos_with_backbone,
         debug=debug,
     )
     if debug:

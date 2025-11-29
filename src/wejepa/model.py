@@ -143,6 +143,7 @@ class IJEPA_base(nn.Module):
         layer_dropout: float = 0.0,
         backbone: str = None,
         pretrained: bool = False,
+        use_jepa_pos_with_backbone: bool = False,
         debug: bool = False,
     ) -> None:
         super().__init__()
@@ -188,6 +189,10 @@ class IJEPA_base(nn.Module):
             )
             self.num_tokens = self.patch_dim[0] * self.patch_dim[1]
             self.patch_embed = None
+            if use_jepa_pos_with_backbone:
+                self.pos_embedding = nn.Parameter(torch.randn(1, self.num_tokens, embed_dim))
+            else:
+                self.pos_embedding = None
         else:
             self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
             self.patch_dim = self.patch_embed.patch_shape
@@ -197,8 +202,8 @@ class IJEPA_base(nn.Module):
                     f"[DEBUG] Using PatchEmbed img_size={img_size} patch_size={patch_size} "
                     f"num_tokens={self.num_tokens}"
                 )
+            self.pos_embedding = nn.Parameter(torch.randn(1, self.num_tokens, embed_dim))
 
-        self.pos_embedding = nn.Parameter(torch.randn(1, self.num_tokens, embed_dim))
         self.mask_token = nn.Parameter(torch.randn(1, 1, embed_dim))
         nn.init.trunc_normal_(self.mask_token, std=0.02)
 
@@ -218,7 +223,8 @@ class IJEPA_base(nn.Module):
 
     def _maybe_resize_positional_embedding(self, tokens: torch.Tensor) -> None:
         """Resize positional embeddings when backbone token grids differ."""
-
+        if self.pos_embedding is None:
+            return
         seq_len = tokens.shape[1]
         if seq_len == self.pos_embedding.shape[1]:
             return
@@ -373,8 +379,10 @@ class IJEPA_base(nn.Module):
                 f"[DEBUG] Forward mode={self.mode} input={tuple(x.shape)} tokens={tuple(tokens.shape)}"
             )
         # add positional embeddings and norm
-        self._maybe_resize_positional_embedding(tokens)
-        tokens = tokens + self.pos_embedding              # B x N x D
+        if self.pos_embedding is not None:
+            self._maybe_resize_positional_embedding(tokens)
+            tokens = tokens + self.pos_embedding              # B x N x D
+
         tokens = self.post_emb_norm(tokens)
 
         if self.mode == "test":
