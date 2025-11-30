@@ -27,11 +27,7 @@
     "use_jepa_pos_with_backbone": true
   },
   "optimizer": {
-    "epochs": 20,
-    "warmup_epochs": 1,
-    "base_learning_rate": 0.001,
-    "start_learning_rate": 0.0001,
-    "final_learning_rate": 1e-05,
+    "epochs": 100,
     "weight_decay": 0.05,
     "final_weight_decay": 0.2,
     "betas": [

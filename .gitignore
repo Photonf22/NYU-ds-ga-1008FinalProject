@@ -232,3 +232,6 @@ data/
 
 ## client meta data
 **/*.wejepa_config.json
+
+# Ignore Wandb
+wandb/
