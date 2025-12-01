@@ -293,6 +293,24 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict], debug: 
         eps=cfg.optimizer.eps,
         weight_decay=cfg.optimizer.weight_decay,
     )
+
+    resume_checkpoint = getattr(cfg, 'resume_checkpoint', None)
+    if resume_checkpoint is not None and os.path.isfile(resume_checkpoint):
+        if rank == 0:
+            print(f"[DEBUG] Loading weights from checkpoint: {resume_checkpoint}")
+        checkpoint = torch.load(resume_checkpoint, map_location=device)
+        # Load student, teacher, predictor weights
+        module = model.module if isinstance(model, DDP) else model
+        if 'student' in checkpoint:
+            module.student_encoder.load_state_dict(checkpoint['student'])
+        if 'teacher' in checkpoint:
+            module.teacher_encoder.load_state_dict(checkpoint['teacher'])
+        if 'predictor' in checkpoint:
+            module.predictor.load_state_dict(checkpoint['predictor'])
+        if 'optimizer' in checkpoint:
+            optimizer.load_state_dict(checkpoint['optimizer'])
+        if rank == 0:
+            print("[DEBUG] Successfully loaded checkpoint weights.")
     if debug and rank == 0:
         print(
             f"[DEBUG] Preparing dataloader with batch_size={cfg.data.train_batch_size}, "
@@ -376,6 +394,12 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Pretrain the WE-JEPA encoder on requested dataset")
     parser.add_argument("--config", type=str, help="Path to a JSON config file", default=None)
     parser.add_argument(
+        "--resume-checkpoint",
+        type=str,
+        default=None,
+        help="Path to a previous checkpoint to resume or initialize from (for domain adaptation or continued SSL)",
+    )
+    parser.add_argument(
         "--print-config",
         action="store_true",
         help="Print the default configuration and exit",
@@ -395,6 +419,9 @@ def main() -> None:
         cfg = IJepaConfig.from_dict(cfg_dict)
     else:
         cfg = default_config()
+    # Add resume_checkpoint to config if provided
+    if args.resume_checkpoint is not None:
+        setattr(cfg, 'resume_checkpoint', args.resume_checkpoint)
     if args.print_config:
         print(cfg.summary())
         return
