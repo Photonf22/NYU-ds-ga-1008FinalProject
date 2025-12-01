@@ -23,6 +23,9 @@ from torch.cuda.amp import GradScaler
 from torch import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+# --- wandb for experiment tracking ---
+import wandb
+
 from ..config import IJepaConfig, default_config
 from ..datasets import create_pretraining_dataloader
 from ..model import IJEPA_base
@@ -276,6 +279,16 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict], debug: 
     model = _build_model(cfg, debug=debug).to(device)
     if rank == 0:
         print(f"Model has {model.count_parameters():,} trainable parameters.")
+
+    # --- wandb init (only on rank 0) ---
+    if rank == 0:
+        wandb_run = wandb.init(
+            project="ijepa-pretrain",
+            name=f"ijepa_run_{int(time.time())}",
+            config=cfg.to_dict(),
+            dir=str(cfg.hardware.output_dir),
+            reinit=True,
+        )
     if cfg.hardware.compile_model and hasattr(torch, "compile"):
         model = torch.compile(model)  # type: ignore[attr-defined]
     if world_size > 1:
@@ -381,6 +394,17 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict], debug: 
                 print(f"[DEBUG] New best loss {best_loss:.4f}, saved checkpoint to {ckpt_path}")
             else:
                 print(f"[DEBUG] Loss did not improve (best: {best_loss:.4f}), checkpoint not saved.")
+
+            # --- wandb logging (per epoch) ---
+            wandb.log({
+                "loss/train": stats["loss"],
+                "epoch": epoch,
+                "best_loss": best_loss,
+                "lr": optimizer.param_groups[0]["lr"],
+            }, step=epoch)
+
+    if rank == 0:
+        wandb.finish()
     if world_size > 1:
         _cleanup_distributed()
 
