@@ -350,6 +350,8 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict], debug: 
     state = TrainState()
     if debug and rank == 0:
         print("[DEBUG] Starting training loop...")
+    best_loss = float('inf')
+    best_ckpt_path = None
     for epoch in range(cfg.optimizer.epochs):
         if sampler is not None:
             sampler.set_epoch(epoch)
@@ -369,12 +371,16 @@ def _train_worker(rank: int, world_size: int, cfg_dict: Dict[str, Dict], debug: 
             debug=debug,
         )
         print("Epoch completed.")
-        if rank == 0 and (epoch + 1) % cfg.hardware.checkpoint_every == 0:
-            module = model.module if isinstance(model, DDP) else model
-            ckpt_path = save_checkpoint(module, optimizer, state, epoch, cfg, debug=debug)
-            print(f"Saved checkpoint to {ckpt_path}")
         if rank == 0:
             print(f"Epoch {epoch + 1}/{cfg.optimizer.epochs} | loss={stats['loss']:.4f}")
+            if stats['loss'] < best_loss:
+                best_loss = stats['loss']
+                module = model.module if isinstance(model, DDP) else model
+                ckpt_path = save_checkpoint(module, optimizer, state, epoch, cfg, debug=debug)
+                best_ckpt_path = ckpt_path
+                print(f"[DEBUG] New best loss {best_loss:.4f}, saved checkpoint to {ckpt_path}")
+            else:
+                print(f"[DEBUG] Loss did not improve (best: {best_loss:.4f}), checkpoint not saved.")
     if world_size > 1:
         _cleanup_distributed()
 
