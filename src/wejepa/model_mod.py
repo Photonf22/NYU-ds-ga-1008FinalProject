@@ -1,16 +1,15 @@
-"""JEPA model implementation"""
+"""Simplified I-JEPA style encoder used throughout the wejepa package."""
 from __future__ import annotations
 
 import copy
 import math
-from typing import Callable, List, Optional, Sequence, Tuple, Union
+from typing import List, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from einops import rearrange
 
-from wejepa.backbones import build_backbone, choose_num_heads, get_backbone_spec, BackboneFeatureExtractor
+from wejepa.backbones import build_backbone
 
 
 class PatchEmbed(nn.Module):
@@ -41,6 +40,32 @@ class PatchEmbed(nn.Module):
         x = rearrange(x, "b e h w -> b (h w) e")
         return x
 
+# Patch Embedding from Alejandro
+class PatchEmbedding(nn.Module):
+    def __init__(self, image_size, patch_size, in_channels, embed_dim):
+        
+      super(PatchEmbedding, self).__init__()
+      self.image_size = image_size
+      self.patch_size = patch_size
+      self.num_patches = (image_size // patch_size) ** 2  # // is the floor division operator 
+      
+      self.proj = nn.Sequential(
+          nn.Conv2d(in_channels,128 , kernel_size=3, stride=1, padding=1),
+          nn.BatchNorm2d(128),
+          nn.GELU(),
+          nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
+          nn.BatchNorm2d(64),
+          nn.GELU(),
+          nn.Conv2d(64, embed_dim, kernel_size=patch_size, stride=patch_size),
+      )
+    # want output to be (batch_size, num_patches, embed_dim)
+    def forward(self, x):
+      projected_patches = self.proj(x)  # Shape: (batch_size, embed_dim, num_patches_sqrt, num_patches_sqrt)
+      projected_patches = projected_patches.flatten(2)  # Shape: (batch_size, embed_dim, num_patches)
+      projected_patches = projected_patches.transpose(1, 2)  # Shape: (batch_size, num_patches, embed_dim)
+      projected_patches = rearrange(projected_patches, 'b e h w -> b (h w) e')
+      return projected_patches
+    
 
 class TransformerBlock(nn.Module):
     def __init__(
@@ -48,14 +73,13 @@ class TransformerBlock(nn.Module):
         embed_dim: int,
         num_heads: int,
         mlp_ratio: float = 4.0,
-        dropout: float = 0.0,
+        dropout: float = 0.1,    # changed from 0.0 (Alejandro)
     ) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(embed_dim)
-        self.attn = nn.MultiheadAttention(
-            embed_dim, num_heads, batch_first=True, dropout=dropout
-        )
+        self.attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True, dropout=dropout)
         self.norm2 = nn.LayerNorm(embed_dim)
+        self.dropout = nn.Dropout(dropout)
         hidden_dim = int(embed_dim * mlp_ratio)
         self.mlp = nn.Sequential(
             nn.Linear(embed_dim, hidden_dim),
@@ -64,29 +88,12 @@ class TransformerBlock(nn.Module):
             nn.Linear(hidden_dim, embed_dim),
             nn.Dropout(dropout),
         )
-        self._attention_recorder: Optional[Callable[[torch.Tensor], None]] = None
-
-    def set_attention_recorder(self, recorder: Optional[Callable[[torch.Tensor], None]]) -> None:
-        """Optionally capture attention weights during the forward pass."""
-
-        self._attention_recorder = recorder
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = x
-        x = self.norm1(x)
-        attn_out, attn_weights = self.attn(
-            x,
-            x,
-            x,
-            need_weights=self._attention_recorder is not None,
-            average_attn_weights=False,
-        )
-        if self._attention_recorder is not None and attn_weights is not None:
-            self._attention_recorder(attn_weights.detach())
-        x = residual + attn_out
-        residual = x
-        x = self.norm2(x)
-        x = residual + self.mlp(x)
+        attn_out, _ = self.attn(self.norm1(x), self.norm1(x), self.norm1(x), need_weights=False)
+        attn_out = self.dropout(attn_out)
+        x = x + attn_out
+        x = x + self.mlp(self.norm2(x))
         return x
 
 
@@ -97,10 +104,6 @@ class TransformerEncoder(nn.Module):
             [TransformerBlock(embed_dim, num_heads) for _ in range(depth)]
         )
         self.norm = nn.LayerNorm(embed_dim)
-
-    def set_attention_recorder(self, recorder: Optional[Callable[[torch.Tensor], None]]) -> None:
-        for layer in self.layers:
-            layer.set_attention_recorder(recorder)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:
@@ -128,6 +131,8 @@ class Predictor(nn.Module):
 
 
 class IJEPA_base(nn.Module):
+    """Simplified implementation of the Image-based JEPA architecture."""
+
     def __init__(
         self,
         img_size: int,
@@ -143,71 +148,37 @@ class IJEPA_base(nn.Module):
         layer_dropout: float = 0.0,
         backbone: str = None,
         pretrained: bool = False,
-        use_jepa_pos_with_backbone: bool = True,
-        debug: bool = False,
     ) -> None:
         super().__init__()
         del layer_dropout  # kept for backwards compatibility
-        self.debug = debug
         self.M = M
         self.mode = mode
         self.backbone = None
         self.patch_embed = None
-        self.backbone_feature: Optional[BackboneFeatureExtractor] = None
-        self._debug_logged = False
-        self.num_classes = None
-        self.freeze = None
-        self.use_jepa_pos_with_backbone = use_jepa_pos_with_backbone
 
         if backbone is not None:
-            spec = get_backbone_spec(backbone)
-            self.freeze = True
             self.backbone, self.feature_dim = build_backbone(
                 backbone,
                 pretrained=pretrained,
                 num_classes=None,
-                freeze_backbone=self.freeze,
-                use_jepa_pos_with_backbone=use_jepa_pos_with_backbone,
             )
-            self.backbone_feature = BackboneFeatureExtractor(self.backbone.model, spec)
-            embed_dim = self.backbone.hidden_dim
-            img_size = self.backbone.image_size
-            patch_size = self.backbone.patch_size
-            num_heads = choose_num_heads(embed_dim, spec.default_num_heads, num_heads)
-
-            if self.debug:
-                print(
-                    f"[DEBUG] Using backbone '{backbone}' | hidden_dim={embed_dim} "
-                    f"pretrained={pretrained} freeze_backbone={self.freeze} "
-                    f"image_size={img_size} patch_size={patch_size} num_heads={num_heads}"
-                    f"backbone spec={spec}"
-                )
+            embed_dim = self.backbone.hidden_dim 
+            img_size = self.backbone.image_size   
+            patch_size = self.backbone.patch_size 
 
             # so that everything downstream sees compatible shapes
-            self.patch_dim = getattr(self.backbone, "patch_dim", None) or (
-                img_size // patch_size,
-                img_size // patch_size,
-            )
+            self.patch_dim = (img_size // patch_size, img_size // patch_size)
             self.num_tokens = self.patch_dim[0] * self.patch_dim[1]
             self.patch_embed = None
-            if use_jepa_pos_with_backbone:
-                self.pos_embedding = nn.Parameter(torch.randn(1, self.num_tokens, embed_dim))
-            else:
-                self.pos_embedding = None
         else:
-            self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
+            self.patch_embed = PatchEmbedding(img_size, patch_size, in_chans, embed_dim)
             self.patch_dim = self.patch_embed.patch_shape
             self.num_tokens = self.patch_dim[0] * self.patch_dim[1]
-            if self.debug:
-                print(
-                    f"[DEBUG] Using PatchEmbed img_size={img_size} patch_size={patch_size} "
-                    f"num_tokens={self.num_tokens}"
-                )
-            self.pos_embedding = nn.Parameter(torch.randn(1, self.num_tokens, embed_dim))
 
+        self.pos_embedding = nn.Parameter(torch.randn(1, self.num_tokens, embed_dim))
         self.mask_token = nn.Parameter(torch.randn(1, 1, embed_dim))
         nn.init.trunc_normal_(self.mask_token, std=0.02)
-
+        
         self.post_emb_norm = nn.LayerNorm(embed_dim) if post_emb_norm else nn.Identity()
         self.norm = nn.LayerNorm(embed_dim)
         self.student_encoder = TransformerEncoder(embed_dim, enc_depth, num_heads)
@@ -215,60 +186,9 @@ class IJEPA_base(nn.Module):
         for param in self.teacher_encoder.parameters():
             param.requires_grad = False
         self.predictor = Predictor(embed_dim, num_heads, pred_depth)
-        self._attention_maps: List[torch.Tensor] = []
-
-    def get_backbone_features(self, x: torch.Tensor) -> torch.Tensor:
-        if self.backbone_feature is None:
-                    raise RuntimeError("No classification backbone is configured for feature extraction.")
-        return self.backbone_feature(x)
-
-    def _maybe_resize_positional_embedding(self, tokens: torch.Tensor) -> None:
-        """Resize positional embeddings when backbone token grids differ."""
-        if self.pos_embedding is None:
-            return
-        seq_len = tokens.shape[1]
-        if seq_len == self.pos_embedding.shape[1]:
-            return
-
-        if self.debug:
-            print(
-                f"[DEBUG] Resizing positional embeddings from {self.pos_embedding.shape[1]} to {seq_len} tokens"
-            )
-
-        old_tokens = self.pos_embedding.shape[1]
-        old_h = int(math.sqrt(old_tokens)) or 1
-        old_w = old_tokens // old_h
-
-        new_h = int(math.sqrt(seq_len)) or 1
-        new_w = max(1, seq_len // new_h)
-        if new_h * new_w != seq_len:
-            new_w = math.ceil(seq_len / new_h)
-            new_h = math.ceil(seq_len / new_w)
-
-        pos = self.pos_embedding
-        pos = pos.reshape(1, old_h, old_w, -1).permute(0, 3, 1, 2)
-        pos = F.interpolate(pos, size=(new_h, new_w), mode="bilinear", align_corners=False)
-        pos = pos.permute(0, 2, 3, 1).reshape(1, new_h * new_w, -1)
-
-        # replace parameter so gradients flow to resized tensor
-        self.pos_embedding = nn.Parameter(pos)
-        self.patch_dim = (new_h, new_w)
-        self.num_tokens = new_h * new_w
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
-
-    def enable_attention_recording(self, enabled: bool = True) -> None:
-        """Toggle attention recording on the student encoder."""
-
-        self._attention_maps = [] if enabled else []
-        recorder = self._attention_maps.append if enabled else None
-        self.student_encoder.set_attention_recorder(recorder)
-
-    def get_recorded_attentions(self) -> List[torch.Tensor]:
-        """Return any attention maps captured during the last forward pass."""
-
-        return list(self._attention_maps)
 
     @torch.no_grad()
     def momentum_update(self, momentum: float) -> None:
@@ -316,11 +236,6 @@ class IJEPA_base(nn.Module):
                         all_patches.append(idx)
             target_patches.append(patches)
             target_block[block_idx] = enc[:, patches, :]
-            if self.debug and not self._debug_logged:
-                print(
-                    f"[DEBUG] Target block {block_idx}: start=({start_patch_h},{start_patch_w}) size=({block_h},{block_w}) "
-                    f"patch_count={len(patches)}"
-                )
         return target_block, target_patches, all_patches
 
     def get_context_block(
@@ -351,11 +266,6 @@ class IJEPA_base(nn.Module):
         if not patches:
             available = [idx for idx in range(num_tokens) if idx not in target_set]
             patches = available if available else list(range(num_tokens))
-        if self.debug and not self._debug_logged:
-            print(
-                f"[DEBUG] Context block start=({start_patch_h},{start_patch_w}) size=({block_h},{block_w}) "
-                f"patches_used={len(patches)}"
-            )
         return x[:, patches, :]
 
     def forward(
@@ -366,7 +276,7 @@ class IJEPA_base(nn.Module):
         context_aspect_ratio: float = 1.0,
         context_scale: float = 0.9,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        self._debug_logged = False
+        #print("Forward pass in mode:", self.mode)
         # get tokens from either backbone or PatchEmbed
         if self.backbone is not None:
             tokens = self.backbone(x)                     # B x N x D
@@ -375,24 +285,10 @@ class IJEPA_base(nn.Module):
         else:
             tokens = x
 
-        if self.debug and not self._debug_logged:
-            print(
-                f"[DEBUG] Forward mode={self.mode} input={tuple(x.shape)} tokens={tuple(tokens.shape)}"
-            )
+        #print("Tokens shape:", tokens.shape)
         # add positional embeddings and norm
-        if self.pos_embedding is not None:
-            self._maybe_resize_positional_embedding(tokens)
-            tokens = tokens + self.pos_embedding              # B x N x D
-        
-        if self.backbone is None or self.use_jepa_pos_with_backbone:
-            tokens = tokens + self.pos_embedding
-
+        tokens = tokens + self.pos_embedding              # B x N x D
         tokens = self.post_emb_norm(tokens)
-
-        if self.mode == "test":
-            encoded = self.student_encoder(tokens)
-            encoded = self.norm(encoded)
-            return encoded
 
         # use the *same* block selection for both modes
         #print("Selecting target and context blocks...")
@@ -410,11 +306,7 @@ class IJEPA_base(nn.Module):
             context_aspect_ratio,
             context_scale,
             all_patches,
-        )
-        if self.debug and not self._debug_logged:
-            print(
-                f"[DEBUG] Context encoding shape before predictor: {tuple(context_block.shape)}"
-            )
+        ) 
         context_encoding = self.student_encoder(context_block)
         context_encoding = self.norm(context_encoding)
         m, bsz, n_tok, embed_dim = target_blocks.shape
@@ -425,22 +317,10 @@ class IJEPA_base(nn.Module):
             pos_embed = self.pos_embedding[:, target_patches[i], :]
             target_masks = target_masks + pos_embed
             prediction_blocks[i] = self.predictor(context_encoding, target_masks)
-            if self.debug and not self._debug_logged:
-                print(
-                    f"[DEBUG] Prediction block {i}: masks={tuple(target_masks.shape)} "
-                    f"prediction={tuple(prediction_blocks[i].shape)} target={tuple(target_blocks[i].shape)}"
-                )
-        self._debug_logged = True
         return prediction_blocks, target_blocks
 
-    # number of parameters (student + predictor)
+    # print number of parameters
     def count_parameters(self) -> int:
-        student_params = sum(p.numel() for p in self.student_encoder.parameters() if p.requires_grad)
-        predictor_params = sum(p.numel() for p in self.predictor.parameters() if p.requires_grad)
-        return student_params + predictor_params
-
-    # number of trainable parameters including teacher
-    def count_trainable_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 __all__ = ["IJEPA_base", "PatchEmbed"]

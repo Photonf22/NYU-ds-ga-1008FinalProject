@@ -1,4 +1,3 @@
-"""Configuration objects for the wejepa package."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
@@ -20,6 +19,7 @@ class DataConfig:
 
     dataset_root: str = field(default_factory=_default_dataset_root)
     dataset_name: str = "cifar100"
+    dataset_dir: Optional[str] = None
     image_size: int = 32
     train_batch_size: int = 256
     eval_batch_size: int = 512
@@ -28,13 +28,22 @@ class DataConfig:
     persistent_workers: bool = True
     prefetch_factor: int = 2
     crop_scale: Tuple[float, float] = (0.6, 1.0)
-    color_jitter: float = 0.5
-    use_color_distortion: bool = True
-    use_horizontal_flip: bool = True
+    color_jitter: Optional[float] = None
+    use_color_distortion: Optional[bool] = False
+    use_horizontal_flip: Optional[bool] = False
     normalization_mean: Tuple[float, float, float] = (0.5071, 0.4867, 0.4408)
     normalization_std: Tuple[float, float, float] = (0.2675, 0.2565, 0.2761)
+    #normalization_mean: Optional[Tuple[float, float, float]] = None
+    #normalization_std: Optional[Tuple[float, float, float]] = None
+    #color_jitter: float = 0.5
+    #use_color_distortion: bool = True
+    #use_horizontal_flip: bool = True
     use_fake_data: bool = False
     fake_data_size: int = 512
+    # For custom list-based datasets
+    image_dir: Optional[str] = None
+    image_list: Optional[str] = None
+    labels: Optional[str] = None
 
 
 @dataclass
@@ -50,7 +59,7 @@ class MaskConfig:
 
 @dataclass
 class ModelConfig:
-    """Architecture settings for :class:`wejepa.model.IJEPA_base`."""
+    """Architecture settings"""
 
     img_size: int = 32
     patch_size: int = 4
@@ -61,9 +70,11 @@ class ModelConfig:
     num_heads: int = 6
     post_emb_norm: bool = False
     layer_dropout: float = 0.0
-    classification_backbone: str = None 
+    classification_backbone: Optional[str] = None
     classification_num_classes: int = 100
-    classification_pretrained: bool = True
+    classification_pretrained: bool = False
+    model_bypass: bool = False
+    use_jepa_pos_with_backbone: bool = False
 
 
 @dataclass
@@ -118,12 +129,17 @@ class IJepaConfig:
 
     @classmethod
     def from_dict(cls, payload: Dict[str, Any]) -> "IJepaConfig":
+        data = DataConfig(**payload["data"])
+        mask = MaskConfig(**payload["mask"]) if "mask" in payload else MaskConfig()
+        model = ModelConfig(**payload["model"]) if "model" in payload else ModelConfig()
+        optimizer = OptimizerConfig(**payload["optimizer"]) if "optimizer" in payload else OptimizerConfig()
+        hardware = HardwareConfig(**payload["hardware"]) if "hardware" in payload else HardwareConfig()
         return cls(
-            data=DataConfig(**payload["data"]),
-            mask=MaskConfig(**payload["mask"]),
-            model=ModelConfig(**payload["model"]),
-            optimizer=OptimizerConfig(**payload["optimizer"]),
-            hardware=HardwareConfig(**payload["hardware"]),
+            data=data,
+            mask=mask,
+            model=model,
+            optimizer=optimizer,
+            hardware=hardware,
         )
 
     def summary(self) -> str:
@@ -139,6 +155,18 @@ def default_config() -> IJepaConfig:
     return cfg
 
 
+def hf224_config() -> IJepaConfig:
+    """Configuration tailored for 224x224 Hugging Face image datasets."""
+
+    cfg = default_config()
+    cfg.data.dataset_name = "imagefolder"
+    cfg.data.dataset_dir = "tsbpp_fall2025_deeplearning"
+    cfg.data.image_size = 224
+    cfg.model.img_size = 224
+    cfg.model.patch_size = 16
+    return cfg
+
+
 __all__ = [
     "IJepaConfig",
     "DataConfig",
@@ -147,4 +175,5 @@ __all__ = [
     "OptimizerConfig",
     "HardwareConfig",
     "default_config",
+    "hf224_config",
 ]

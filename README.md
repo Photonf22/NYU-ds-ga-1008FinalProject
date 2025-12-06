@@ -1,5 +1,11 @@
 # WE-JEPA
 
+## Important Dates
+* Initial test + Kaggle platform release: November 18, 2025.
+* Final public test release: November 25, 2025.
+* Final submission deadline: December 2, 2025 (11:59pm local time).
+* Report: Due during the exam period. 4 pages (excluding references), with citations, using the **CVPR template.**
+
 Reference implementation of a lightweight Image-based Joint-Embedding Predictive Architecture (I-JEPA) style encoder that we
 use for the DS-GA-1008 final project.
 
@@ -53,6 +59,9 @@ launch_pretraining(cfg)
 
 Checkpoints (student, teacher and predictor weights) are stored in
 `cfg.hardware.output_dir` after every epoch.
+
+For a deeper dive into the architecture and configuration knobs, see
+[`docs/architecture.md`](docs/architecture.md).
 
 ## Fine-tuning / linear probing
 

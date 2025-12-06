@@ -1,11 +1,12 @@
 {
   "data": {
     "dataset_root": "./data",
-    "dataset_name": "tsbpp___fall2025_deeplearning",
+    "dataset_name": "imagefolder",
+    "dataset_dir": "tsbpp_fall2025_deeplearning",
     "image_size": 224,
     "train_batch_size": 256,
     "eval_batch_size": 512,
-    "num_workers": 4,
+    "num_workers": 8,
     "pin_memory": true,
     "persistent_workers": true,
     "prefetch_factor": 2,
@@ -17,14 +18,14 @@
     "use_color_distortion": true,
     "use_horizontal_flip": true,
     "normalization_mean": [
-      0.485,
-      0.456,
-      0.406
+      0.5071,
+      0.4867,
+      0.4408
     ],
     "normalization_std": [
-      0.229,
-      0.224,
-      0.225
+      0.2675,
+      0.2565,
+      0.2761
     ],
     "use_fake_data": false,
     "fake_data_size": 512
@@ -47,20 +48,20 @@
   },
   "model": {
     "img_size": 224,
-    "patch_size": 4,
+    "patch_size": 32,
     "in_chans": 3,
-    "embed_dim": 192,
+    "embed_dim": 384,
     "enc_depth": 6,
     "pred_depth": 4,
     "num_heads": 6,
     "post_emb_norm": false,
     "layer_dropout": 0.0,
-    "classification_backbone": "vit_b_16",
-    "classification_num_classes": 1000,
-    "classification_pretrained": true
+    "classification_backbone": "convnext_small",
+    "classification_num_classes": 100,
+    "classification_pretrained": false
   },
   "optimizer": {
-    "epochs": 5,
+    "epochs": 100,
     "warmup_epochs": 1,
     "base_learning_rate": 0.001,
     "start_learning_rate": 0.0001,
@@ -78,11 +79,11 @@
   },
   "hardware": {
     "seed": 42,
-    "world_size": null,
+    "world_size": 4,
     "mixed_precision": true,
     "compile_model": false,
     "log_every": 50,
     "checkpoint_every": 1,
-    "output_dir": "./outputs/ijepa/vit_b_16"
+    "output_dir": "./outputs/convnext_small"
   }
 }

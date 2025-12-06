@@ -226,3 +226,12 @@ data/
 
 ## weights/checkpoints
 **/*.pt
+
+## WSL stuff?
+**/*Zone.Identifier
+
+## client meta data
+**/*.wejepa_config.json
+
+# Ignore Wandb
+wandb/

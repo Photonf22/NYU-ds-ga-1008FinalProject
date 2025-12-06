@@ -1,4 +1,5 @@
 """HuggingFace dataset helpers for pretraining."""
+import importlib
 import random
 import numpy as np
 from PIL import Image
@@ -6,7 +7,6 @@ from scipy import io
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
-from datasets import load_dataset
 import torchvision.transforms as T
 import torch.distributed as dist
 
@@ -23,11 +23,27 @@ class IJEPAHFDataset(Dataset):
     ):
         self.cfg = cfg
         self.transform = transform or build_train_transform(cfg)
-        self.dataset = load_dataset(
-            cfg.data.dataset_name,
-            split=split,
-            cache_dir=cfg.data.dataset_root,
-        )
+        datasets = importlib.import_module("datasets")
+        if cfg.data.dataset_name.lower() == "imagefolder":
+            dataset_dir = getattr(cfg.data, "dataset_dir", None)
+            if dataset_dir is None:
+                raise ValueError("For 'imagefolder' dataset_name, 'dataset_dir' must be specified in the config.")
+
+            dataset_dir = cfg.data.dataset_root + "/" + dataset_dir
+            print(f"Loading imagefolder dataset from directory: {dataset_dir}")
+            self.dataset = datasets.load_dataset(
+                "imagefolder",
+                data_dir=dataset_dir,
+                split=split,
+                cache_dir=cfg.data.dataset_root,
+            )
+        else:
+            load_dataset = datasets.load_dataset
+            self.dataset = load_dataset(
+                cfg.data.dataset_name,
+                split=split,
+                cache_dir=cfg.data.dataset_root,
+            )
 
     def __len__(self):
         return len(self.dataset)
@@ -43,12 +59,13 @@ class IJEPAHFDataset(Dataset):
                 img = Image.open(io.BytesIO(img["bytes"]))
             else:
                 raise TypeError(f"Unknown image dict format: {img}")
+        img = img.convert("RGB")
         img = self.transform(img)
         return img
 
 def build_train_transform(cfg: IJepaConfig) -> T.Compose:
     dcfg = cfg.data
-    transforms = [T.Resize(dcfg.image_size)]
+    transforms = [T.Resize((dcfg.image_size, dcfg.image_size))]
     transforms.extend([
         T.ToTensor(),
         T.Normalize(dcfg.normalization_mean, dcfg.normalization_std),
