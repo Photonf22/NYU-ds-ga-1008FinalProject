@@ -1,7 +1,7 @@
 {
   "data": {
     "dataset_name": "cub200",
-    "dataset_root": "./data/cub200",
+    "dataset_root": "./data",
     "image_size": 224,
     "train_batch_size": 256,
     "eval_batch_size": 512,
