@@ -35,7 +35,9 @@ dependencies = [
   "timm",
   "wandb",
   "hydra-core",
-  "omegaconf"
+  "omegaconf",
+  "transformers",
+  "lightly",
 ]
 
 [project.optional-dependencies]

@@ -26,3 +26,5 @@ omegaconf
 huggingface_hub
 datasets>=2.16
 einops>=0.7
+transformers
+lightly
