@@ -235,3 +235,12 @@ data/
 
 # Ignore Wandb
 wandb/
+# latex files
+**/*.aux*
+**/*.fls*
+**/*.fdb*
+**/*.out
+**/*.toc
+**/*.lot
+**/*.pdf
+**/*.lof
