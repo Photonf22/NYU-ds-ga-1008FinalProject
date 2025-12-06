@@ -32,6 +32,10 @@ dependencies = [
   "einops>=0.7",
   "datasets>=2.16",
   "huggingface_hub",
+  "timm",
+  "wandb",
+  "hydra-core",
+  "omegaconf"
 ]
 
 [project.optional-dependencies]

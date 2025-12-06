@@ -7,3 +7,6 @@
 [submodule "docs/Instructions/fall2025_finalproject"]
 	path = docs/Instructions/fall2025_finalproject
 	url = git@github.com:tsb0601/fall2025_finalproject.git
+[submodule "src/lejepa"]
+	path = src/lejepa
+	url = git@github.com:rbalestr-lab/lejepa.git
