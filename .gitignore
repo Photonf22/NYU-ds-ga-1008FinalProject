@@ -221,3 +221,12 @@ __marimo__/
 #
 **/*.gz
 
+# latex files
+**/*.aux*
+**/*.fls*
+**/*.fdb*
+**/*.out
+**/*.toc
+**/*.lot
+**/*.pdf
+**/*.lof
