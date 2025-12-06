@@ -19,3 +19,10 @@ torchviz
 einops
 x_transformers
 pytorch_lightning
+timm
+wandb
+hydra-core
+omegaconf
+huggingface_hub
+datasets>=2.16
+einops>=0.7
