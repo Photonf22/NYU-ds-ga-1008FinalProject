@@ -4,9 +4,9 @@
     "dataset_name": "imagefolder",
     "dataset_dir": "tsbpp_fall2025_deeplearning",
     "image_size": 224,
-    "train_batch_size": 256,
+    "train_batch_size": 512,
     "eval_batch_size": 512,
-    "num_workers": 4,
+    "num_workers": 8,
     "pin_memory": true,
     "persistent_workers": true,
     "prefetch_factor": 2,
@@ -61,7 +61,7 @@
     "classification_pretrained": false
   },
   "optimizer": {
-    "epochs": 5,
+    "epochs": 100,
     "warmup_epochs": 1,
     "base_learning_rate": 0.001,
     "start_learning_rate": 0.0001,

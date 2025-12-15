@@ -2,7 +2,7 @@
   "data": {
     "dataset_root": "./data",
     "dataset_name": "imagefolder",
-    "dataset_dir": "tsbpp_fall2025_deeplearning",
+    "dataset_dir": "devel",
     "image_size": 224,
     "train_batch_size": 512,
     "eval_batch_size": 512,
@@ -57,7 +57,6 @@
     "post_emb_norm": false,
     "layer_dropout": 0.0,
     "classification_backbone": "vit_b_16",
-    "classification_num_classes": 100,
     "classification_pretrained": false
   },
   "optimizer": {
@@ -82,7 +81,7 @@
     "world_size": 4,
     "mixed_precision": true,
     "compile_model": false,
-    "log_every": 50,
+    "log_every": 200,
     "checkpoint_every": 1,
     "output_dir": "./outputs/vit_b_16"
   }
